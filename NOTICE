@@ -1,0 +1,13 @@
+kordoc-local
+============
+
+This package wraps (does not modify) the following open-source software:
+
+  kordoc — https://github.com/chrisryugj/kordoc
+  Copyright (c) chrisryugj. Licensed under the MIT License (see LICENSE-kordoc).
+  Installed unmodified from npm (kordoc ^4.17). sample/dummy.hwpx is taken from its tests/fixtures.
+  Bundled OCR models (models/, via `kordoc models --export`) are PP-OCRv5 (PaddlePaddle, Apache-2.0);
+  see kordoc's NOTICE and THIRD_PARTY/ inside node_modules/kordoc.
+
+Files authored for this package (MIT):
+  app.py, ui.html, goal-prompt.md, selftest.py, setup.sh, setup.ps1, pack.sh, README.md

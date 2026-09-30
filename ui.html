@@ -1,0 +1,126 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kordoc local</title>
+<style>
+  :root{--bg:#fafaf8;--fg:#1f1f1f;--muted:#777;--line:#ddd;--acc:#2f6fed}
+  body{font:15px/1.65 -apple-system,"Pretendard","Apple SD Gothic Neo",system-ui,sans-serif;background:var(--bg);color:var(--fg);max-width:1200px;margin:0 auto;padding:20px 16px}
+  h1{font-size:20px;margin:0 0 4px}h1 small{font-weight:400;color:var(--muted);font-size:13px}
+  .row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:300px}
+  textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:6px;box-sizing:border-box;background:#fff;resize:vertical}
+  #q{height:90px}#out{height:360px}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0}
+  select,button,input[type=file]{font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;background:#fff}
+  button.primary{background:var(--acc);color:#fff;border-color:var(--acc);padding:6px 22px;cursor:pointer}button:disabled{opacity:.5}
+  #status,#stages{color:var(--muted);font-size:13px}#stages{min-height:1.4em;margin:6px 0}#stages b{color:var(--fg)}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-top:14px}
+  .tabs button{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:6px 12px;cursor:pointer;color:var(--muted)}
+  .tabs button.on{color:var(--fg);border-bottom-color:var(--acc)}
+  .pane{display:none;padding:12px 0}.pane.on{display:block}
+  pre{white-space:pre-wrap;background:#f1f1ee;padding:12px;border-radius:6px;font-size:13px;line-height:1.5;overflow-x:auto}
+  .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:600}
+  .ok{background:#dff5e1;color:#1a6b2a}.warn{background:#fff2cc;color:#8a6100}.bad{background:#fde2e2;color:#a33}
+  #meta{margin:10px 0;font-size:14px}#meta span{margin-right:14px}#meta a{color:var(--acc);font-weight:600}
+  #runs{font-size:13px}#runs li{cursor:pointer;padding:3px 0;list-style:none}#runs li:hover{color:var(--acc)}
+  details{margin-top:14px}summary{cursor:pointer;color:var(--muted);font-size:13px}
+</style>
+
+<h1>kordoc local <small>— HWP·HWPX·PDF·DOCX·XLSX → 로컬 Ollama 요약 · 질문 · 공문서 초안(HWPX)</small></h1>
+<div id="stages"></div>
+<div class="bar">
+  <input type="file" id="file" accept=".hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.md,.txt">
+  <label>작업 <select id="task"><option value="summary">요약<option value="qa">질문</option><option value="draft">공문서 초안 → HWPX</option></select></label>
+  <label id="presetL" hidden>프리셋 <select id="preset"><option>보고서<option>기안문<option>계획서<option>통지<option>회의록<option>개조식<option>업무보고<option>서울방침<option>보도자료</select></label>
+  <label>모델 <select id="model"></select></label>
+</div>
+<textarea id="q" placeholder="질문 또는 요청 (요약은 비워도 됨). 예: 3장 예산 총액은? / ○○ 개선방안 보고서 초안 써줘"></textarea>
+<div class="bar">
+  <button id="go" class="primary">실행</button>
+  <button id="copy">결과 복사</button>
+  <span id="status"></span>
+</div>
+<textarea id="out" placeholder="결과 (토큰 스트리밍)" readonly></textarea>
+
+<div id="res" hidden>
+  <div id="meta"></div>
+  <div class="tabs">
+    <button data-t="src" class="on">파싱된 원문(Markdown)</button>
+    <button data-t="lint">표기법 검수</button>
+    <button data-t="log">로그</button>
+  </div>
+  <div id="p-src" class="pane on"><pre id="src"></pre></div>
+  <div id="p-lint" class="pane"><pre id="lint"></pre></div>
+  <div id="p-log" class="pane"><pre id="log"></pre></div>
+</div>
+
+<details><summary>이전 실행 기록</summary><ul id="runs"></ul></details>
+
+<script>
+const $ = id => document.getElementById(id);
+const MODEL_DEFAULT = %MODEL%;
+fetch('/api/models').then(r => r.json()).then(ms => {
+  $('model').innerHTML = ms.map(m => `<option ${m === MODEL_DEFAULT ? 'selected' : ''}>${m}</option>`).join('');
+}).catch(() => $('status').textContent = 'Ollama에 연결할 수 없습니다 (localhost:11434)');
+$('task').onchange = () => $('presetL').hidden = $('task').value !== 'draft';
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.tabs button, .pane').forEach(e => e.classList.remove('on'));
+  b.classList.add('on'); $('p-' + b.dataset.t).classList.add('on');
+});
+$('copy').onclick = () => navigator.clipboard.writeText($('out').value);
+
+function show(j) {
+  $('out').value = j.output; $('res').hidden = false;
+  let m = `<span>run <code>${j.run_id}</code></span><span>작업 <b>${j.task}</b></span><span>모델 ${j.model}</span>`;
+  if (j.file) m += `<span>문서 ${j.file}${j.truncated ? ' <span class="badge warn">앞부분만 사용</span>' : ''}</span>`;
+  if (j.task === 'draft') {
+    const l = j.lint && j.lint.summary;
+    m += l ? `<span class="badge ${l.errors ? 'warn' : 'ok'}">표기법 ${l.errors ? l.errors + '건 수정 필요' : '통과'}</span>` : '';
+    m += j.hwpx ? `<span class="badge ${j.valid ? 'ok' : 'bad'}">HWPX ${j.valid ? '검증 통과' : '검증 실패'}</span> <a href="/api/runs/${j.run_id}/03_result.hwpx">⬇ ${j.preset}.hwpx 내려받기</a>`
+                : '<span class="badge bad">HWPX 생성 실패 (로그 확인)</span>';
+  }
+  $('meta').innerHTML = m;
+  $('src').textContent = j.source || '(문서 없음)';
+  $('lint').textContent = j.lint ? JSON.stringify(j.lint, null, 2) : '(draft 작업에서만 실행)';
+  $('log').textContent = j.log || '';
+}
+
+async function loadRuns() {
+  const rs = await fetch('/api/runs').then(r => r.json());
+  $('runs').innerHTML = rs.map(r => `<li data-id="${r.run_id}">${r.ts} · ${r.task} · ${r.model} · ${r.file || '-'} · ${r.head}…</li>`).join('') || '<li>없음</li>';
+  $('runs').querySelectorAll('li[data-id]').forEach(li => li.onclick = async () => {
+    const j = await fetch('/api/runs/' + li.dataset.id).then(r => r.json()); $('q').value = j.question || ''; show(j);
+  });
+}
+loadRuns();
+
+const b64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = no; r.readAsDataURL(f); });
+
+$('go').onclick = async () => {
+  const f = $('file').files[0], question = $('q').value.trim();
+  if (!f && !question) { $('status').textContent = '문서를 고르거나 요청을 쓰세요'; return; }
+  $('go').disabled = true; $('res').hidden = true; $('out').value = ''; $('stages').textContent = '';
+  $('status').textContent = '실행 중 — 로컬 모델은 수 분 걸릴 수 있습니다';
+  const t0 = Date.now();
+  try {
+    const body = { task: $('task').value, question, model: $('model').value, preset: $('preset').value };
+    if (f) { body.file_name = f.name; body.file_b64 = await b64(f); }
+    const r = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (!line.startsWith('data: ')) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.stage) { $('stages').innerHTML += `<b>${ev.stage}</b> ${ev.msg} · `; if (ev.reset) $('out').value = ''; }
+        if (ev.token) { $('out').value += ev.token; $('out').scrollTop = $('out').scrollHeight; }
+        if (ev.error) throw new Error(ev.error);
+        if (ev.done) { show(ev.done); loadRuns(); }
+      }
+    }
+    $('status').textContent = `완료 ${((Date.now() - t0) / 1000).toFixed(0)}초`;
+  } catch (e) { $('status').textContent = '오류: ' + e.message; }
+  $('go').disabled = false;
+};
+</script>

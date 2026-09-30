@@ -1,0 +1,8 @@
+{
+  "name": "kordoc-local",
+  "private": true,
+  "description": "kordoc(HWP/HWPX/PDF/DOCX/XLSX 파서) + 로컬 Ollama 문서 에이전트",
+  "dependencies": {
+    "kordoc": "^4.17.2"
+  }
+}
