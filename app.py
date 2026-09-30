@@ -159,6 +159,8 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
         raise ValueError(f"task 는 {TASKS} 중 하나")
     if preset not in PRESETS:
         preset = "보고서"
+    if file and not file.lower().endswith(EXTS):
+        raise ValueError(f"지원하지 않는 확장자: {os.path.basename(file)} (지원: {', '.join(EXTS)})")
     run_id = f"{datetime.date.today()}-{secrets.token_hex(2)}"
     d = os.path.join(WS, run_id)
     os.makedirs(d)
@@ -166,8 +168,6 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
 
     if file:
         name = os.path.basename(file)
-        if not name.lower().endswith(EXTS):
-            raise ValueError(f"지원하지 않는 확장자: {name} (지원: {', '.join(EXTS)})")
         src = os.path.join(d, "00_" + name)
         shutil.copy(file, src)
         emit({"stage": "parse", "msg": f"kordoc 파싱 {name}"})
