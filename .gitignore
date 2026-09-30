@@ -1,0 +1,8 @@
+node_modules/
+_workspace/
+__pycache__/
+dist-offline/
+.server.pid
+server.log
+server.err.log
+node/
