@@ -363,6 +363,30 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     return result
 
 
+def result_name(j, path):
+    """03_result 를 내려받을 때 이름"""
+    stem, ext = os.path.splitext(j.get("file") or "")[0], os.path.splitext(path)[1]
+    tag = "윤문" if j.get("task") == "polish" else j.get("preset") or "초안"
+    return (f"{stem}_{tag}" if stem else tag) + ext
+
+
+def polish_source(run_id):
+    """이전 실행에서 윤문할 문서를 고른다 — 03_result(초안·윤문 결과) 우선, 없으면 00_원본. 알아볼 수 있는 이름으로 _upload 에 복사"""
+    if not re.fullmatch(RUN_RE, run_id or ""): raise ValueError("잘못된 실행 ID")
+    d = os.path.join(WS, run_id); j = json.loads(read(os.path.join(d, "result.json")))
+    if j.get("hwpx") and os.path.exists(os.path.join(d, j["hwpx"])):
+        src = os.path.join(d, j["hwpx"])
+        name = (os.path.splitext(j["file"])[0] + os.path.splitext(src)[1]) if j["task"] == "polish" else result_name(j, src)  # 윤문본을 다시 윤문하면 이름 유지
+    else:
+        cand = [f for f in os.listdir(d) if f.startswith("00_")]
+        if not cand: raise ValueError("이 실행에는 윤문할 문서가 없습니다")
+        src, name = os.path.join(d, cand[0]), cand[0][3:]
+    os.makedirs(os.path.join(WS, "_upload"), exist_ok=True)
+    dst = os.path.join(WS, "_upload", re.sub(r"[^\w.\-가-힣 ]", "_", name))
+    shutil.copy(src, dst)
+    return dst
+
+
 def list_runs():
     out = []
     if not os.path.isdir(WS):
@@ -411,10 +435,8 @@ class H(BaseHTTPRequestHandler):
             m = re.fullmatch(rf"/api/runs/({RUN_RE})/(03_result\.hwpx|03_result\.hwp|02_answer\.md|02_polished\.md|01_source\.md)", self.path)
             if m:
                 name = f"{m.group(1)}_{m.group(2)}"
-                if m.group(2).startswith("03_result"):  # 내려받는 이름: 원본이름_윤문.hwpx / 원본이름_보고서.hwpx
-                    j = json.loads(read(os.path.join(WS, m.group(1), "result.json")))
-                    stem = os.path.splitext(j.get("file") or "문서")[0]
-                    name = f"{stem}_{'윤문' if j.get('task') == 'polish' else j.get('preset') or '초안'}{os.path.splitext(m.group(2))[1]}"
+                if m.group(2).startswith("03_result"):  # 원본이름_윤문.hwpx / 원본이름_보고서.hwpx / 보고서.hwpx
+                    name = result_name(json.loads(read(os.path.join(WS, m.group(1), "result.json"))), m.group(2))
                 with open(os.path.join(WS, m.group(1), m.group(2)), "rb") as f:
                     return self._send(f.read(), "application/octet-stream", name=name)
             self._send(HTML.replace("%MODEL%", json.dumps(MODEL)).encode(), "text/html; charset=utf-8")
@@ -433,6 +455,11 @@ class H(BaseHTTPRequestHandler):
             file = os.path.join(WS, "_upload", name)
             with open(file, "wb") as f:
                 f.write(base64.b64decode(req["file_b64"]))
+        if req.get("from_run"):  # 결과 화면의 "윤문하기": 그 실행의 HWPX 결과(없으면 올렸던 원본)를 이어서 윤문
+            try:
+                file = polish_source(req["from_run"])
+            except (ValueError, FileNotFoundError) as e:
+                return self._send({"error": str(e)}, code=400)
         if not file and not (req.get("question") or "").strip():
             return self._send({"error": "문서나 요청 중 하나는 있어야 합니다"}, code=400)
         self.send_response(200)

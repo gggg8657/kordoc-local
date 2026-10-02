@@ -40,6 +40,8 @@ _, msg = app.kordoc("--silent", os.path.join(app.WS, r["run_id"], "03_result.hwp
 rt = app.read(os.path.join(app.WS, r["run_id"], "04_back.md"))
 assert "| 자문위원 | 홍길동 |" in rt and "자문 결과 보고" in rt, rt[:300]
 
+draft_run = r["run_id"]
+
 # 4) 잘못된 확장자 거부
 try:
     app.process("summary", "", os.path.join(app.ROOT, "package.json"), "fake"); assert False
@@ -59,5 +61,16 @@ assert r["changes"] and all(c["applied"] for c in r["changes"]), [c for c in r["
 assert any("42%" in c["before"] for c in r["rejected"]), r["rejected"]
 back = app.parse_to(os.path.join(app.WS, r["run_id"], "03_result.hwpx"))
 assert "| 수작업 위주로 진행되고 있음 |" in back and "42%" in back and "통일성을 확보하기" in back, back
+
+# 6) 결과 화면의 "윤문하기": 초안 HWPX 결과를 이어서 윤문 (이름은 <원본>_<프리셋>), 원본만 있는 실행은 원본을
+src = app.polish_source(draft_run)
+assert os.path.basename(src) == "dummy_보고서.hwpx", src
+r2 = app.process("polish", "", src, "fake")
+assert r2["mode"] == "patch" and r2["valid"] and app.result_name(r2, r2["hwpx"]) == "dummy_보고서_윤문.hwpx", (r2["log"], r2["file"])
+assert os.path.basename(app.polish_source(r["run_id"])) == "polish_test.hwpx"  # 윤문본을 다시 → 이름 유지
+try:
+    app.polish_source("../etc"); assert False
+except ValueError:
+    pass
 
 print("selftest OK — kordoc:", " ".join(app.KORDOC[:2]), "runs:", [x["run_id"] for x in app.list_runs()[:3]])
