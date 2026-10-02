@@ -32,7 +32,7 @@
 <div class="bar">
   <input type="file" id="file" accept=".hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.md,.txt">
   <label>작업 <select id="task"><option value="summary">요약<option value="qa">질문</option><option value="draft">공문서 초안 → HWPX</option></select></label>
-  <label id="presetL" hidden>프리셋 <select id="preset"><option>보고서<option>기안문<option>간이기안문<option>계획서<option>통지<option>회의록<option>개조식<option>업무보고<option>서울방침<option>보도자료</select></label>
+  <label id="presetL" hidden>프리셋 <select id="preset"><optgroup label="연구원 양식" id="formOpts"></optgroup><optgroup label="공문서 프리셋"><option>보고서<option>기안문<option>간이기안문<option>계획서<option>통지<option>회의록<option>개조식<option>업무보고<option>서울방침<option>보도자료</optgroup></select></label>
   <label>모델 <select id="model"></select></label>
 </div>
 <textarea id="q" placeholder="질문 또는 요청 (요약은 비워도 됨). 예: 3장 예산 총액은? / ○○ 개선방안 보고서 초안 써줘"></textarea>
@@ -61,6 +61,14 @@
   <div id="p-lint" class="pane"><pre id="lint"></pre></div>
   <div id="p-log" class="pane"><pre id="log"></pre></div>
 </div>
+
+<details id="formsBox"><summary>📁 연구원 양식 관리 (HWPX)</summary>
+  <p style="font-size:13px;color:var(--muted);margin:8px 0">양식을 한 번 올려 두면 <b>공문서 초안 → 양식</b>에서 고를 수 있어요. 칸이 정해진 서식(출장 정산서·제출서류 등)은 칸을 채우고,
+  보고서 양식처럼 Ⅰ·□·○ 단계 견본이 있는 양식은 그 모양 그대로 본문을 새로 짭니다. <b>HWPX만 받아요</b> — HWP는 한글에서 <i>파일 → 다른 이름으로 저장 → 파일 형식: HWPX</i>로 바꿔 올려 주세요.</p>
+  <div class="bar"><input type="file" id="formFile" accept=".hwpx,.hwp,.doc,.docx"><input id="formName" placeholder="양식 이름 (비우면 파일 이름)" style="font:inherit;padding:6px 10px;border:1px solid var(--line);border-radius:6px;min-width:220px">
+  <button id="formUp">양식 올리기</button><span id="formMsg" style="font-size:13px"></span></div>
+  <table class="cg" id="formList"></table>
+</details>
 
 <details><summary>이전 실행 기록</summary><ul id="runs"></ul></details>
 
@@ -129,6 +137,27 @@ async function loadRuns() {
   });
 }
 loadRuns();
+
+const KIND = { fill: '칸 채우기', body: '본문 작성' };
+async function loadForms() {
+  const fs = await fetch('/api/forms').then(r => r.json());
+  $('formOpts').innerHTML = fs.map(f => `<option value="form:${f.id}">${esc(f.name)}</option>`).join('');
+  $('formList').innerHTML = fs.length ? `<tr><th>이름</th><th>종류</th><th>인식한 것</th><th></th></tr>` + fs.map(f => `<tr><td>${esc(f.name)}</td>
+    <td><select data-id="${f.id}" class="fkind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === f.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+    <td style="font-size:13px;color:var(--muted)">${f.kind === 'fill' ? `칸 ${f.fields.length}개${f.boxes.length ? ' · 큰 칸 ' + f.boxes.length : ''}` : `견본 ${Object.entries(f.roles).map(([k, v]) => ({ chapter: 'Ⅰ장', l1: '□', l2: '○', l3: '-', l4: '·', note: '※', caption: '표제목', table: '표', refbox: '참고상자' }[k])).join(' ')} · 앞부분 ${f.front.length}곳`}</td>
+    <td><button data-del="${f.id}">삭제</button></td></tr>`).join('') : '<tr><td>올린 양식이 없어요</td></tr>';
+  document.querySelectorAll('.fkind').forEach(s => s.onchange = () => fetch('/api/forms/kind', { method: 'POST', body: JSON.stringify({ id: s.dataset.id, kind: s.value }) }).then(loadForms));
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('이 양식을 삭제할까요?')) { await fetch('/api/forms/delete', { method: 'POST', body: JSON.stringify({ id: b.dataset.del }) }); loadForms(); } });
+}
+loadForms();
+$('formUp').onclick = async () => {
+  const f = $('formFile').files[0]; if (!f) { $('formMsg').textContent = '파일을 고르세요'; return; }
+  if (!/\.hwpx$/i.test(f.name)) { $('formMsg').innerHTML = '<span class="badge warn">HWPX만 받아요</span> 한글에서 <b>파일 → 다른 이름으로 저장 → 파일 형식: HWPX 문서</b>로 저장해 올려 주세요.'; return; }
+  $('formMsg').textContent = '분석 중…';
+  const r = await fetch('/api/forms', { method: 'POST', body: JSON.stringify({ name: $('formName').value.trim(), file_name: f.name, file_b64: await b64(f) }) }).then(r => r.json());
+  $('formMsg').innerHTML = r.error ? `<span class="badge bad">${esc(r.error)}</span>` : `<span class="badge ok">등록: ${esc(r.name)} — ${KIND[r.kind]}</span>`;
+  $('formFile').value = ''; $('formName').value = ''; loadForms();
+};
 
 const b64 = f => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result.split(',')[1]); r.onerror = no; r.readAsDataURL(f); });
 

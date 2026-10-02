@@ -91,6 +91,29 @@ r = app.process("draft", "기안문 써줘", None, "fake", "기안문")
 assert "붙임 1. 세부 계획 1부.\n2. 명단 1부. 끝." in r["output"] and "보고합니다. 끝." not in r["output"], r["output"]
 assert app.result_name(r, r["hwpx"]) == "기안문.hwpx"
 
+# 8) 연구원 양식: HWPX 만 등록, 본문 작성형은 견본 복제(장 막대·□·ㅇ·표), 칸 채우기형은 라벨 칸 채우기
+import tempfile, shutil as _sh
+app.forms.DIR = tempfile.mkdtemp()
+m = app.forms.register("계획서 견본", open(os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "rb").read(), app.kordoc)
+assert m["kind"] == "body" and m["roles"].get("chapter") and m["roles"].get("l1") and m["roles"].get("table"), m
+BODY = {"front": {str(m["front"][0]["i"]): "시험 계획"}, "body": ["Ⅰ. 첫 장", "□ 항목 하나", "ㅇ 세부 하나", "<표 1. 일정>", "| 구분 | 기간 | 내용 |", "|---|---|---|", "| 1단계 | 10월 | 설계 |", "| 2단계 | 11월 | 개발 |", "Ⅱ. 둘째 장", "□ 항목 둘"]}
+def fake_form(system, user, model, on_token=None):
+    calls.append((system, user)); return json.dumps(BODY, ensure_ascii=False)
+app.ollama = fake_form
+r = app.process("draft", "계획서 써줘", None, "fake", "form:" + m["id"])
+assert "[양식 앞부분" in calls[-1][1] and r["valid"] and r["preset"] == "계획서 견본", r["log"]
+out = r["output"]
+assert "시험 계획" in out and "첫 장" in out and "□ 항목 하나" in out and "| 1단계 | 10월 | 설계 |" in out and "둘째 장" in out, out
+assert "추진배경" not in out and "최근 생성형" not in out, out  # 견본 본문은 버린다
+g = app.forms.register("기안문 서식", open(os.path.join(app.TEMPLATES, "일반기안문_서식.hwpx"), "rb").read(), app.kordoc)
+assert g["kind"] == "fill" and any(f["label"] == "제목" for f in g["fields"]), g
+FILL = {"제목": "시험 제목", "수신자": "내부결재"}
+app.ollama = lambda system, user, model, on_token=None: json.dumps(FILL, ensure_ascii=False)
+r = app.process("draft", "기안 써줘", None, "fake", "form:" + g["id"])
+assert r["valid"] and "시험 제목" in r["output"], r["output"][:300]
+assert app.forms.remove(g["id"])["ok"] and len(app.forms.listing()) == 1
+_sh.rmtree(app.forms.DIR)
+
 # 저작권 표기: ui.html 에서 지워도 서버가 다시 붙인다 (LICENSE·NOTICE)
 import base64 as _b
 _h = app.signed(app.HTML.replace("data-sig", "").replace('name="author"', ""))

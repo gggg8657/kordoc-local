@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import forms
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WS = os.environ.get("WORKSPACE") or os.path.join(ROOT, "_workspace")  # 포털이 AGENT_DATA/<도구> 로 모아 줌
 LLM_API = os.environ.get("LLM_API", "ollama")            # ollama | openai (vLLM·LM Studio·llama.cpp·TGI 등 /v1/chat/completions)
@@ -418,6 +420,36 @@ def gian_indent(hwpx, field):
     return True
 
 
+def form_build(form, answer, d, log, emit):
+    """연구원 양식 채우기 — kind=fill 은 칸 값, kind=body 는 앞부분 + 본문 줄"""
+    meta, path = form
+    try:
+        v = forms.parse_json(answer)
+    except (ValueError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"LLM 이 양식 값을 JSON 으로 쓰지 못했습니다: {e}")
+    write(os.path.join(d, "02_fields.json"), json.dumps(v, ensure_ascii=False, indent=1))
+    hwpx = os.path.join(d, "03_result.hwpx")
+    if meta["kind"] == "fill":
+        emit({"stage": "fill", "msg": f"양식 칸 채우기 — {meta['name']}"})
+        info = forms.fill(meta, path, v, hwpx, kordoc, d)
+        log.append(f"[form fill] {info['filled']}칸 {info['log'][-300:]}")
+        body = "\n".join(f"{k}: {x}" for k, x in v.items() if str(x).strip())
+    else:
+        emit({"stage": "build", "msg": f"양식 견본으로 본문 짜기 — {meta['name']}"})
+        lines = v.get("body") or []
+        if isinstance(lines, str): lines = lines.split("\n")
+        info = forms.build_body(path, hwpx, {str(k): x for k, x in (v.get("front") or {}).items()}, lines)
+        log.append(f"[form body] 앞부분 {info['front']}칸, 본문 {info['lines']}줄")
+        body = "\n".join(map(str, lines))
+    write(os.path.join(d, "02_body.md"), body)
+    _, out = kordoc("lint", "--json", os.path.join(d, "02_body.md"))
+    try: lint = json.loads(out[out.index("{"):])
+    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
+    vcode, vout = kordoc("validate", hwpx); log.append(f"[kordoc validate] exit {vcode} {vout}")
+    return {"lint": lint, "fields": v, "hwpx": "03_result.hwpx", "valid": vcode == 0, "preset": meta["name"], "form": meta["id"],
+            "output": parse_to(hwpx).strip()}
+
+
 def gian_build(preset, answer, d, log, emit):
     try:
         v, att = gian_values(preset, answer)
@@ -448,7 +480,7 @@ def gian_build(preset, answer, d, log, emit):
 def process(task, question="", file=None, model=MODEL, preset="보고서", emit=lambda ev: None, strength="standard"):
     if task not in TASKS:
         raise ValueError(f"task 는 {TASKS} 중 하나")
-    if preset not in PRESETS:
+    if preset not in PRESETS and not str(preset).startswith("form:"):
         preset = "보고서"
     if file and not file.lower().endswith(EXTS):
         raise ValueError(f"지원하지 않는 확장자: {os.path.basename(file)} (지원: {', '.join(EXTS)})")
@@ -478,9 +510,14 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
 
     common, roles = prompts()
     gian = task == "draft" and preset in GIAN
-    system = common + "\n\n" + roles[GIAN[preset][0] if gian else task]
+    form = forms.get(preset[5:]) if task == "draft" and str(preset).startswith("form:") else None  # (meta, path)
+    role = ("form_" + form[0]["kind"]) if form else GIAN[preset][0] if gian else task
+    system = common + "\n\n" + roles[role]
     user = (f"[문서 시작]\n{source}\n[문서 끝]" + ("\n(※ 문서가 길어 앞부분만 제공됨)" if truncated else "")
             if source else "[문서 없음]") + f"\n\n[요청]\n{question or {'summary': '요약해줘', 'qa': '핵심 내용은?', 'draft': '문서 내용으로 초안 작성'}[task]}"
+    if form:
+        t = datetime.date.today()
+        user = f"[양식] {form[0]['name']}\n{forms.prompt_spec(form[0])}\n\n[오늘] {t.year}. {t.month}. {t.day}.\n\n" + user
     write(os.path.join(d, "01_prompt.txt"), user)
 
     emit({"stage": "llm", "msg": f"Ollama {model} ({task})", "reset": True})
@@ -490,7 +527,9 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     result = {"run_id": run_id, "task": task, "model": model, "question": question, "file": os.path.basename(file) if file else None,
               "source": source, "truncated": truncated, "output": answer, "hwpx": None, "lint": None, "valid": None,
               "ts": datetime.datetime.now().isoformat(timespec="seconds")}
-    if gian:
+    if form:
+        result.update(form_build(form, answer, d, log, emit))
+    elif gian:
         result.update(gian_build(preset, answer, d, log, emit))
     elif task == "draft":
         emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
@@ -590,6 +629,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/models":
                 return self._send(models())
+            if self.path == "/api/forms":
+                return self._send(forms.listing())
             if self.path == "/api/runs":
                 return self._send(list_runs())
             m = re.fullmatch(rf"/api/runs/({RUN_RE})", self.path)
@@ -610,6 +651,18 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path.startswith("/api/forms"):  # 양식 등록·삭제·종류 변경
+            try:
+                if self.path == "/api/forms":
+                    name = req.get("file_name") or ""
+                    if not name.lower().endswith(".hwpx"):
+                        raise ValueError(f"양식은 HWPX 파일만 받습니다({os.path.splitext(name)[1] or '확장자 없음'}). " + forms.HOWTO)
+                    return self._send(forms.register((req.get("name") or os.path.splitext(name)[0]).strip()[:60], base64.b64decode(req["file_b64"]), kordoc))
+                if self.path == "/api/forms/delete": return self._send(forms.remove(req.get("id")))
+                if self.path == "/api/forms/kind": return self._send(forms.set_kind(req.get("id"), req.get("kind")))
+            except (ValueError, FileNotFoundError, KeyError) as e:
+                return self._send({"error": str(e)}, code=400)
+            return self._send({"error": "no route"}, code=404)
         task = req.get("task") or "summary"
         file = None
         if req.get("file_b64"):
