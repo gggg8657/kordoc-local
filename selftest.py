@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""LLM 없이 kordoc 왕복만 검증한다: parse(HWPX→MD) → [draft] lint → generate → validate.
+"""LLM 없이 kordoc 왕복만 검증한다: parse(HWPX→MD) → [draft] lint → generate → validate, [polish] 조각 윤문 → patch.
 Ollama 호출을 가짜 함수로 바꿔 끼운다.  npm install 후  python3 selftest.py"""
 import os
+import re
 import app
 
 SAMPLE = os.path.join(app.ROOT, "sample", "dummy.hwpx")
@@ -44,5 +45,19 @@ try:
     app.process("summary", "", os.path.join(app.ROOT, "package.json"), "fake"); assert False
 except ValueError:
     pass
+
+# 5) polish: 조각을 번호로 돌려받아 원본 서식 그대로 반영. 잠긴 표 셀은 텍스트 대조로, 숫자를 바꾼 제안은 원문 유지
+def fake_polish(system, user, model, on_token=None):
+    calls.append((system, user))
+    return "\n".join(f"[{n}] " + t.replace("되어지고", "되고").replace("42%", "40%").replace("의 확보가", "을 확보하기")
+                     for n, t in re.findall(r"^\[(\d+)\] (.*)$", user, flags=re.M))
+app.ollama = fake_polish
+r = app.process("polish", "", os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "fake")
+assert "[조각 시작]" in calls[-1][1] and "polish" not in calls[-1][0].split("## ")[0]
+assert r["mode"] == "patch" and r["hwpx"] == "03_result.hwpx" and r["valid"], r["log"]
+assert r["changes"] and all(c["applied"] for c in r["changes"]), [c for c in r["changes"] if not c["applied"]]
+assert any("42%" in c["before"] for c in r["rejected"]), r["rejected"]
+back = app.parse_to(os.path.join(app.WS, r["run_id"], "03_result.hwpx"))
+assert "| 수작업 위주로 진행되고 있음 |" in back and "42%" in back and "통일성을 확보하기" in back, back
 
 print("selftest OK — kordoc:", " ".join(app.KORDOC[:2]), "runs:", [x["run_id"] for x in app.list_runs()[:3]])
