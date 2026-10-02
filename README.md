@@ -1,8 +1,9 @@
-# kordoc-local — HWP·PDF 문서를 로컬 LLM으로 요약·질문·공문서 초안(HWPX) 생성
+# kordoc-local — HWP·PDF 문서를 로컬 LLM으로 요약·질문·공문서 초안(HWPX) 생성·윤문
 
 > **한 줄 요약** — 오픈소스 한국 공문서 파서 [kordoc](https://github.com/chrisryugj/kordoc)(MIT, PDF 공개 벤치 1위·HWPX 표 무손실)을
 > 폐쇄망 서버의 Ollama나 vLLM에 붙여 쓰는 문서 에이전트 패키지입니다. HWP·HWPX·PDF·DOCX·XLSX(스캔본은 내장 OCR)를 올리면
 > 로컬 LLM이 요약·질의응답을 하고, 보고서·기안문 초안은 kordoc이 표기법 검수 후 **한컴에서 바로 열리는 HWPX** 로 내려줍니다.
+> 기존 문서 **윤문**은 문장만 다듬어 **원본 HWPX/HWP 서식(표·박스·글자모양)을 그대로 둔 채** 다시 내려줍니다.
 > 파이썬은 표준 라이브러리만, 문서 엔진은 Node 20 위에서 돌며 한컴오피스·클라우드 API·API 키가 필요 없습니다.
 > 로컬 8B 모델로 PoC를 돌려 HWPX 생성·검증까지 확인했고, GPU 서버에서 큰 모델을 붙이면 초안 품질이 올라갑니다.
 >
@@ -33,6 +34,7 @@ LLM_API=openai LLM_BASE_URL=http://gpu-server:8000/v1 LLM_MODEL=Qwen3-32B python
 python3 app.py --cli summary 문서.hwpx
 python3 app.py --cli qa 문서.pdf "3장 예산 총액은?"
 python3 app.py --cli draft 문서.hwpx "개선방안 보고서 초안" 보고서     # 문서 없이는 -
+python3 app.py --cli polish 문서.hwpx standard                           # 윤문: light | standard | strong → _workspace/<run>/03_result.hwpx
 ```
 
 | 환경변수 | 기본 | 설명 |
@@ -53,9 +55,11 @@ python3 app.py --cli draft 문서.hwpx "개선방안 보고서 초안" 보고서
 | 요약 | 문서 → `kordoc` parse → 개조식 요약 | 1 |
 | 질문 | 문서 → `kordoc` parse → 근거 인용 답변 (없으면 "문서에 없음") | 1 |
 | 공문서 초안 | (문서) → LLM 이 kordoc 규약 Markdown 작성 → `kordoc lint --munche` 표기법·문체 검수 → `kordoc generate --preset` → `validate` → HWPX 내려받기 | 1 |
+| 윤문 | 문서 → `kordoc parse --keep-layout-tables` → 문단·목록·표 셀을 `[번호] 조각`으로 묶어(2,500자 단위, 2개 병렬) LLM 윤문 → 게이트(숫자·날짜·「」·영문·○○ 기호가 바뀌거나 길이가 0.55~1.5배를 벗어나면 원문 유지) → `kordoc lint` → **HWPX/HWP: `kordoc patch` 로 원본 서식 그대로 반영**, 위치 매핑이 잠긴 조각(표로 만든 제목 막대·요약 박스 안 등)은 `textpatch.mjs` 가 문단 텍스트 대조로 run·글자모양 유지한 채 반영 → 다시 파싱해 반영 여부 확인 → `validate`. 그 밖의 형식(PDF·DOCX·MD 등)은 서식을 되돌릴 원본이 없으므로 선택한 프리셋으로 새 HWPX 생성 | 문서 길이÷2,500자 |
 
 프리셋: 보고서 · 기안문 · 계획서 · 통지 · 회의록 · 개조식 · 업무보고 · 서울방침 · 보도자료.
-결과는 `_workspace/<run>/` 에 남는다(00 원본 · 01 파싱 md · 02 답변 · 03 HWPX). 지원 입력: hwp hwpx hml pdf docx xlsx xls png jpg webp md txt.
+윤문 강도: 가볍게(맞춤법·띄어쓰기·이중 피동·비문만) · 보통 · 적극(간결하게 다시 쓰기). 웹 UI "변경 내역" 탭에서 조각별 원문/윤문 비교(어절 단위 강조)와 원문 유지된 제안·사유를 본다.
+결과는 `_workspace/<run>/` 에 남는다(00 원본 · 01 파싱 md · 02 답변/02_polished.md · 03 HWPX·HWP). 지원 입력: hwp hwpx hml pdf docx xlsx xls png jpg webp md txt.
 
 ## 폐쇄망 반입
 
@@ -72,5 +76,5 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 ## 파일
 
-`app.py` 서버+파이프라인 · `ui.html` · `goal-prompt.md` 역할 프롬프트 3종 · `selftest.py` · `setup.sh`/`setup.ps1` 원샷 설치 · `pack.sh` 폐쇄망 번들 ·
-`sample/dummy.hwpx` · `package.json`(kordoc ^4.17). 출처·라이선스는 `NOTICE`.
+`app.py` 서버+파이프라인 · `textpatch.mjs` 윤문 보완 패치 · `ui.html` · `goal-prompt.md` 역할 프롬프트 4종 · `selftest.py` · `setup.sh`/`setup.ps1` 원샷 설치 · `pack.sh` 폐쇄망 번들 ·
+`sample/dummy.hwpx` · `sample/polish_test.hwpx`(+`.md`, 윤문 테스트용 계획서) · `package.json`(kordoc ^4.17). 출처·라이선스는 `NOTICE`.

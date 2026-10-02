@@ -37,7 +37,7 @@ LLM_KEY = os.environ.get("LLM_API_KEY", "")
 PORT = int(os.environ.get("PORT", "8766"))
 NUM_CTX = int(os.environ.get("NUM_CTX", "16384"))
 MAX_CHARS = int(os.environ.get("MAX_CHARS", "12000"))  # ponytail: 앞부분만 잘라 넣음, 긴 문서는 --format chunks + RAG 로 승급
-TASKS = ("summary", "qa", "draft")
+TASKS = ("summary", "qa", "draft", "polish")
 PRESETS = ("보고서", "기안문", "계획서", "통지", "회의록", "개조식", "업무보고", "서울방침", "보도자료")
 EXTS = (".hwp", ".hwpx", ".hml", ".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".webp", ".md", ".txt")
 _CLI = os.path.join(ROOT, "node_modules", "kordoc", "dist", "cli.js")
@@ -142,19 +142,164 @@ def prompts():
 
 
 # ── 파이프라인 ──────────────────────────────────────────────────────────
-def parse(src, d, log):
+def parse(src, d, log, *opts):
     """문서 → Markdown. md/txt 는 그대로."""
     if src.lower().endswith((".md", ".txt")):
         return read(src)
     out = os.path.join(d, "01_source.md")
-    code, msg = kordoc("--silent", src, "-o", out, cwd=d)
+    code, msg = kordoc("--silent", *opts, src, "-o", out, cwd=d)
     log.append(f"[kordoc parse] exit {code} {msg}"[:2000])
     if code != 0 or not os.path.exists(out):
         raise RuntimeError(f"kordoc 파싱 실패: {msg[-500:]}")
     return read(out)
 
 
-def process(task, question="", file=None, model=MODEL, preset="보고서", emit=lambda ev: None):
+# ── 윤문 (polish) ────────────────────────────────────────────────────────
+# 문단·목록·표 셀을 조각으로 떼어 번호를 붙여 LLM 에 보내고, 같은 자리에 되돌려 넣는다.
+# HWPX/HWP 는 kordoc patch 로 원본 서식 그대로 반영, 그 밖의 형식은 프리셋으로 새 HWPX 를 만든다.
+PATCHABLE = (".hwpx", ".hwp")
+UNIT_MIN = int(os.environ.get("POLISH_MIN_CHARS", "10"))   # 이보다 짧은 조각(제목·단어 셀)은 건드리지 않음
+BATCH_CHARS = int(os.environ.get("POLISH_BATCH_CHARS", "2500"))
+LEAD = re.compile(r"^(\s*(?:[-*+]|\d+[.)]|[가-하][.)]|\(\d+\)|[□■○●◦ㅇ▪※∙·\u2460-\u2473>])\s*)")
+CELL = re.compile(r"(?<=\|)([^|\n]*?(?:\\\|[^|\n]*?)*)(?=\|)")
+KEEP = re.compile(r"\d+(?:[.,:]\d+)*|「[^」]*」|『[^』]*』|“[^”]*”|\"[^\"]*\"|[A-Za-z][A-Za-z0-9&.+\-]*|○{2,}|\*\*|</?\w+>|[①-⑳※□○]")
+STRENGTH = {"light": "강도: 가볍게. 맞춤법·띄어쓰기·이중 피동·명백한 비문만 고치고 나머지는 그대로 둔다.",
+            "standard": "강도: 보통. 위 '고칠 것'을 모두 적용해 읽기 쉽게 다듬되 문장 구조는 크게 바꾸지 않는다.",
+            "strong": "강도: 적극. 뜻을 지키는 한에서 문장을 간결하게 다시 쓴다(길이 30%까지 줄여도 됨)."}
+
+
+def units_of(md):
+    """윤문 대상 조각 [(줄 번호, (시작, 끝), 원문)] — 제목·그림·수식·HTML·짧은 조각은 제외"""
+    out, fence = [], False
+    for i, line in enumerate(md.split("\n")):
+        s = line.strip()
+        if s.startswith(("```", "$$")): fence = not fence; continue
+        if fence or not s or s.startswith(("#", "![", "<", "|-", "| -", "| :")) or re.fullmatch(r"[|\s:\-]+", s): continue
+        if s.startswith("|"):
+            for m in CELL.finditer(line):
+                t = m.group(1).strip()
+                if len(t) >= UNIT_MIN and not t.startswith("<"):
+                    st = m.start(1) + (len(m.group(1)) - len(m.group(1).lstrip()))
+                    out.append((i, (st, st + len(t)), t))
+            continue
+        lead = LEAD.match(line); st = lead.end() if lead else len(line) - len(line.lstrip())
+        t = line[st:].rstrip()
+        if len(t) >= UNIT_MIN: out.append((i, (st, st + len(t)), t))
+    return out
+
+
+def guard(a, b):
+    """윤문 결과를 받아도 되는지. 거부 사유 문자열 또는 None"""
+    if not b: return "빈 응답"
+    if "\n" in b or "|" in b and "|" not in a: return "구조 변경"
+    ka, kb = KEEP.findall(a), KEEP.findall(b)
+    if sorted(ka) != sorted(kb):
+        lost = [x for x in ka if x not in kb][:3]; new = [x for x in kb if x not in ka][:3]
+        return "숫자·고유 표기 변경" + (f" (사라짐: {', '.join(lost)})" if lost else "") + (f" (생김: {', '.join(new)})" if new else "")
+    r = len(b) / max(1, len(a))
+    if not 0.55 <= r <= 1.5: return f"길이 변화 과다 ({r:.0%})"
+    return None
+
+
+def parse_to(path):
+    """결과 문서를 다시 파싱한 마크다운 (반영 확인용)"""
+    out = path + ".md"
+    kordoc("--silent", "--keep-layout-tables", path, "-o", out)
+    try: return read(out)
+    finally:
+        if os.path.exists(out): os.remove(out)
+
+
+def polish_batch(units, model, strength, system):
+    body = "\n".join(f"[{n}] {t}" for n, t in units)
+    out = _clean(ollama(system + "\n\n" + STRENGTH.get(strength, STRENGTH["standard"]), f"[조각 시작]\n{body}\n[조각 끝]", model))
+    got = {}
+    for m in re.finditer(r"^\s*\[(\d+)\]\s?(.*)$", out, flags=re.M):
+        got[int(m.group(1))] = m.group(2).strip()
+    return got
+
+
+def polish(src_file, d, model, strength, preset, log, emit):
+    from concurrent.futures import ThreadPoolExecutor
+    import difflib
+    ext = os.path.splitext(src_file)[1].lower()
+    patchable = ext in PATCHABLE
+    source = parse(src_file, d, log, *(["--keep-layout-tables"] if patchable else []))
+    lines = source.split("\n")
+    us = units_of(source)
+    emit({"stage": "split", "msg": f"윤문 대상 {len(us)}조각 (문단·목록·표 셀)"})
+    batches, cur, size = [], [], 0
+    for n, (_, _, t) in enumerate(us):
+        if cur and size + len(t) > BATCH_CHARS: batches.append(cur); cur, size = [], 0
+        cur.append((n, t)); size += len(t)
+    if cur: batches.append(cur)
+    common, roles = prompts(); system = common + "\n\n" + roles["polish"]
+    got, done = {}, [0]
+
+    def run(b):
+        try:
+            got.update(polish_batch(b, model, strength, system))
+        except Exception as e:
+            log.append(f"[polish] 묶음 실패: {type(e).__name__}: {e}")
+        done[0] += 1
+        emit({"stage": "llm", "msg": f"윤문 {done[0]}/{len(batches)} 묶음 ({model})"})
+
+    with ThreadPoolExecutor(2) as ex: list(ex.map(run, batches))
+    changes, rejected = [], []
+    for n, (i, (st, en), t) in reversed(list(enumerate(us))):  # 같은 줄 안 여러 셀: 뒤에서부터 바꿔야 위치가 안 밀린다
+        new = got.get(n)
+        if new is None or new == t: continue
+        why = guard(t, new)
+        if why: rejected.append({"n": n, "before": t, "after": new, "reason": why}); continue
+        lines[i] = lines[i][:st] + new + lines[i][en:]
+        changes.append({"n": n, "before": t, "after": new, "ratio": round(1 - difflib.SequenceMatcher(None, t, new).ratio(), 2)})
+    changes.reverse(); rejected.reverse()
+    polished = "\n".join(lines)
+    write(os.path.join(d, "02_polished.md"), polished)
+    emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
+    _, out = kordoc("lint", "--json", os.path.join(d, "02_polished.md"))
+    try: lint = json.loads(out[out.index("{"):])
+    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
+    res = {"source": source, "output": polished, "changes": changes, "rejected": rejected, "units": len(us), "lint": lint,
+           "strength": strength, "hwpx": None, "valid": None, "mode": "patch" if patchable else "generate"}
+    if patchable:
+        name, orig = "03_result" + ext, os.path.join(d, os.path.basename(src_file))
+        out_path = os.path.join(d, name)
+        emit({"stage": "patch", "msg": f"kordoc patch — 원본 서식 그대로 {name}"})
+        code, out = kordoc("patch", orig, os.path.join(d, "02_polished.md"), "-o", out_path)
+        log.append(f"[kordoc patch] exit {code} {out}")
+        if code not in (0, 2) or not os.path.exists(out_path):  # 패치 자체가 실패하면 원본에서 텍스트 대조로만 반영
+            shutil.copy(orig, out_path)
+        norm = lambda s: re.sub(r"\s+", " ", s).strip()
+        back = lambda: norm(parse_to(out_path))
+        cur = back()
+        pending = [c for c in changes if norm(c["after"]) not in cur]
+        if pending and ext == ".hwpx":
+            emit({"stage": "patch", "msg": f"위치 매핑이 잠긴 {len(pending)}조각 → 문단 텍스트 대조로 반영"})
+            ej = os.path.join(d, "02_fallback_edits.json")
+            write(ej, json.dumps([{"before": c["before"], "after": c["after"]} for c in pending], ensure_ascii=False))
+            r = subprocess.run(["node", os.path.join(ROOT, "textpatch.mjs"), out_path, ej, out_path], capture_output=True, text=True, cwd=ROOT, timeout=600)
+            log.append(f"[textpatch] exit {r.returncode} {(r.stdout + r.stderr)[-1500:]}")
+            cur = back()
+        for c in changes: c["applied"] = norm(c["after"]) in cur
+        res["applied"] = sum(c["applied"] for c in changes)
+        res["hwpx"] = name
+        if ext == ".hwpx":
+            vcode, vout = kordoc("validate", out_path); log.append(f"[kordoc validate] exit {vcode} {vout}")
+            res["valid"] = vcode == 0
+        else:
+            res["valid"] = res["applied"] == len(changes)
+    else:
+        emit({"stage": "generate", "msg": f"원본이 {ext} 라 서식 보존 불가 → kordoc generate --preset {preset}"})
+        code, out = kordoc("generate", os.path.join(d, "02_polished.md"), "-o", os.path.join(d, "03_result.hwpx"), "--preset", preset)
+        log.append(f"[kordoc generate] exit {code} {out}")
+        if code == 0:
+            vcode, vout = kordoc("validate", os.path.join(d, "03_result.hwpx")); log.append(f"[kordoc validate] exit {vcode} {vout}")
+            res.update(hwpx="03_result.hwpx", valid=vcode == 0, preset=preset)
+    return res
+
+
+def process(task, question="", file=None, model=MODEL, preset="보고서", emit=lambda ev: None, strength="standard"):
     if task not in TASKS:
         raise ValueError(f"task 는 {TASKS} 중 하나")
     if preset not in PRESETS:
@@ -165,6 +310,15 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     d = os.path.join(WS, run_id)
     os.makedirs(d)
     log, source, truncated = [], "", False
+    if task == "polish":
+        if not file: raise ValueError("윤문할 문서를 올려 주세요")
+        src = os.path.join(d, "00_" + os.path.basename(file)); shutil.copy(file, src)
+        emit({"stage": "parse", "msg": f"kordoc 파싱 {os.path.basename(file)}"})
+        result = {"run_id": run_id, "task": task, "model": model, "question": question, "file": os.path.basename(file), "truncated": False,
+                  "ts": datetime.datetime.now().isoformat(timespec="seconds"), **polish(src, d, model, strength, preset, log, emit)}
+        result["log"] = "\n".join(log)
+        write(os.path.join(d, "result.json"), json.dumps(result, ensure_ascii=False, indent=1))
+        return result
 
     if file:
         name = os.path.basename(file)
@@ -254,10 +408,15 @@ class H(BaseHTTPRequestHandler):
             m = re.fullmatch(rf"/api/runs/({RUN_RE})", self.path)
             if m:
                 return self._send(read(os.path.join(WS, m.group(1), "result.json")).encode())
-            m = re.fullmatch(rf"/api/runs/({RUN_RE})/(03_result\.hwpx|02_answer\.md|01_source\.md)", self.path)
+            m = re.fullmatch(rf"/api/runs/({RUN_RE})/(03_result\.hwpx|03_result\.hwp|02_answer\.md|02_polished\.md|01_source\.md)", self.path)
             if m:
+                name = f"{m.group(1)}_{m.group(2)}"
+                if m.group(2).startswith("03_result"):  # 내려받는 이름: 원본이름_윤문.hwpx / 원본이름_보고서.hwpx
+                    j = json.loads(read(os.path.join(WS, m.group(1), "result.json")))
+                    stem = os.path.splitext(j.get("file") or "문서")[0]
+                    name = f"{stem}_{'윤문' if j.get('task') == 'polish' else j.get('preset') or '초안'}{os.path.splitext(m.group(2))[1]}"
                 with open(os.path.join(WS, m.group(1), m.group(2)), "rb") as f:
-                    return self._send(f.read(), "application/octet-stream", name=f"{m.group(1)}_{m.group(2)}")
+                    return self._send(f.read(), "application/octet-stream", name=name)
             self._send(HTML.replace("%MODEL%", json.dumps(MODEL)).encode(), "text/html; charset=utf-8")
         except FileNotFoundError:
             self._send({"error": "없음"}, code=404)
@@ -287,7 +446,7 @@ class H(BaseHTTPRequestHandler):
 
         try:
             emit({"done": process(task, (req.get("question") or "").strip(), file, req.get("model") or MODEL,
-                                  req.get("preset") or "보고서", emit)})
+                                  req.get("preset") or "보고서", emit, req.get("strength") or "standard")})
         except Exception as e:
             emit({"error": f"{type(e).__name__}: {e}"})
         finally:
@@ -301,11 +460,12 @@ if __name__ == "__main__":
         file = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] != "-" else None
         q = sys.argv[4] if len(sys.argv) > 4 else ""
         preset = sys.argv[5] if len(sys.argv) > 5 else "보고서"
-        r = process(task, q, file, MODEL, preset,
-                    emit=lambda ev: print(f"[{ev['stage']}] {ev['msg']}", file=sys.stderr) if "stage" in ev else None)
+        strength = q if task == "polish" and q in STRENGTH else "standard"  # polish: 4번째 인자가 강도
+        r = process(task, "" if task == "polish" else q, file, MODEL, preset,
+                    emit=lambda ev: print(f"[{ev['stage']}] {ev['msg']}", file=sys.stderr) if "stage" in ev else None, strength=strength)
         r.pop("source")
         print(json.dumps(r, ensure_ascii=False, indent=1))
-        sys.exit(0 if r["task"] != "draft" or r["valid"] else 2)
+        sys.exit(0 if r["task"] not in ("draft", "polish") or r["valid"] else 2)
     if not os.path.exists(_CLI):
         print("경고: node_modules/kordoc 없음 → npx 로 대체 (느림). 이 폴더에서 `npm install` 권장", file=sys.stderr)
     print(f"kordoc local → http://localhost:{PORT}  (model={MODEL}, llm={LLM_API} {LLM_BASE}, kordoc={' '.join(KORDOC[:2])})")
