@@ -75,15 +75,15 @@ except ValueError:
 
 # 7) 기안문: 표준 일반기안문 서식 채우기 — 붙임 유무별 '끝.' 처리, 항목별 문단·내어쓰기, gian_defaults 로 빈 칸 채우기
 import json
-GIAN = {"행정기관명": "", "수신자": "내부결재", "제목": "시범 구축 계획 보고", "본문": "1. 추진 목적\n  가. 업무 효율화\n\n2. 추진 내용\n  가. 매우 긴 항목입니다 " + "가나다라 " * 30 + "\n위와 같이 보고합니다. 끝.",
+GIAN = {"행정기관명": "다른기관", "발신명의": "", "수신자": "내부결재", "제목": "시범 구축 계획 보고", "본문": "1. 추진 목적\n  가. 업무 효율화\n\n2. 추진 내용\n  가. 매우 긴 항목입니다 " + "가나다라 " * 30 + "\n위와 같이 보고합니다. 끝.",
         "붙임": [], "기안자": "", "공개구분": ""}
-app.gian_defaults = lambda: {"행정기관명": "시험기관", "기안자": "주무관 ○○○"}
+app.gian_defaults = lambda: ({"행정기관명": "시험기관", "발신명의": "시험기관장", "기안자": "주무관 ○○○"}, {"행정기관명", "발신명의"})
 def fake_gian(system, user, model, on_token=None):
     calls.append((system, user)); return "```json\n" + json.dumps(GIAN, ensure_ascii=False) + "\n```"
 app.ollama = fake_gian
 r = app.process("draft", "기안문 써줘", None, "fake", "기안문")
 assert "일반기안문" in calls[-1][0] and r["hwpx"] and r["valid"], r["log"]
-assert r["fields"]["행정기관명"] == "시험기관" and r["fields"]["기안자"] == "주무관 ○○○" and r["fields"]["본문"].endswith("보고합니다.  끝."), r["fields"]
+assert r["fields"]["행정기관명"] == "시험기관" and r["fields"]["발신명의"] == "시험기관장" and r["fields"]["기안자"] == "주무관 ○○○" and r["fields"]["본문"].endswith("보고합니다.  끝."), r["fields"]
 assert "붙임" not in r["output"].split("보고합니다.")[1].split("수신자")[0], r["output"]  # 붙임 없으면 붙임 줄 비움
 assert "[indent] 본문 항목별 문단·내어쓰기 적용" in r["log"] and "\n\n2. 추진 내용" in r["output"], r["output"][:400]
 GIAN["붙임"] = ["세부 계획 1부", "명단"]
