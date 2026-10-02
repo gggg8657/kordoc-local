@@ -91,4 +91,9 @@ r = app.process("draft", "기안문 써줘", None, "fake", "기안문")
 assert "붙임 1. 세부 계획 1부.\n2. 명단 1부. 끝." in r["output"] and "보고합니다. 끝." not in r["output"], r["output"]
 assert app.result_name(r, r["hwpx"]) == "기안문.hwpx"
 
+# 저작권 표기: ui.html 에서 지워도 서버가 다시 붙인다 (LICENSE·NOTICE)
+import base64 as _b
+_h = app.signed(app.HTML.replace("data-sig", "").replace('name="author"', ""))
+assert "data-sig" in _h and 'name="author"' in _h and _b.b64decode("ZG9uZ2p1a2ltLmRldkBnbWFpbC5jb20=").decode() in _h, "저작권 표기 누락"
+
 print("selftest OK — kordoc:", " ".join(app.KORDOC[:2]), "runs:", [x["run_id"] for x in app.list_runs()[:3]])

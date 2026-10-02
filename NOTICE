@@ -11,3 +11,4 @@ This package wraps (does not modify) the following open-source software:
 
 Files authored for this package (MIT):
   app.py, ui.html, goal-prompt.md, selftest.py, setup.sh, setup.ps1, pack.sh, README.md
+  Copyright (c) 2026 김동주 <dongjukim.dev@gmail.com>
