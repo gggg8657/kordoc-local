@@ -19,7 +19,7 @@ node node_modules/kordoc/dist/cli.js check-ocr-models >/dev/null 2>&1 || true
 node node_modules/kordoc/dist/cli.js models --export "$STAGE/models"
 
 # 3) 앱 파일
-cp app.py textpatch.mjs ui.html goal-prompt.md selftest.py setup.sh setup.ps1 README.md NOTICE LICENSE LICENSE-kordoc "$STAGE/"
+cp app.py textpatch.mjs gian_defaults.example.json ui.html goal-prompt.md selftest.py setup.sh setup.ps1 README.md NOTICE LICENSE LICENSE-kordoc "$STAGE/"
 cp -r sample "$STAGE/"
 
 # 4) (선택) Node 바이너리

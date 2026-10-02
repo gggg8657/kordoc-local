@@ -38,7 +38,7 @@ PORT = int(os.environ.get("PORT", "8766"))
 NUM_CTX = int(os.environ.get("NUM_CTX", "16384"))
 MAX_CHARS = int(os.environ.get("MAX_CHARS", "12000"))  # ponytail: 앞부분만 잘라 넣음, 긴 문서는 --format chunks + RAG 로 승급
 TASKS = ("summary", "qa", "draft", "polish")
-PRESETS = ("보고서", "기안문", "계획서", "통지", "회의록", "개조식", "업무보고", "서울방침", "보도자료")
+PRESETS = ("보고서", "기안문", "간이기안문", "계획서", "통지", "회의록", "개조식", "업무보고", "서울방침", "보도자료")
 EXTS = (".hwp", ".hwpx", ".hml", ".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".webp", ".md", ".txt")
 _CLI = os.path.join(ROOT, "node_modules", "kordoc", "dist", "cli.js")
 KORDOC = ["node", _CLI] if os.path.exists(_CLI) else ["npx", "-y", "kordoc@^4"]
@@ -162,7 +162,7 @@ UNIT_MIN = int(os.environ.get("POLISH_MIN_CHARS", "10"))   # 이보다 짧은 �
 BATCH_CHARS = int(os.environ.get("POLISH_BATCH_CHARS", "2500"))
 LEAD = re.compile(r"^(\s*(?:[-*+]|\d+[.)]|[가-하][.)]|\(\d+\)|[□■○●◦ㅇ▪※∙·\u2460-\u2473>])\s*)")
 CELL = re.compile(r"(?<=\|)([^|\n]*?(?:\\\|[^|\n]*?)*)(?=\|)")
-KEEP = re.compile(r"\d+(?:[.,:]\d+)*|「[^」]*」|『[^』]*』|“[^”]*”|\"[^\"]*\"|[A-Za-z][A-Za-z0-9&.+\-]*|○{2,}|\*\*|</?\w+>|[①-⑳※□○]")
+KEEP = re.compile(r"\d+(?:[.,:]\d+)*|「[^」]*」|『[^』]*』|“[^”]*”|\"[^\"]*\"|[A-Za-z][A-Za-z0-9&.+\-]*|○{2,}|\*\*|</?\w+>|[①-⑳※□○:]")  # ':' — '제목  ○○' 같은 서식 항목명에 쌍점을 붙이지 않게
 STRENGTH = {"light": "강도: 가볍게. 맞춤법·띄어쓰기·이중 피동·명백한 비문만 고치고 나머지는 그대로 둔다.",
             "standard": "강도: 보통. 위 '고칠 것'을 모두 적용해 읽기 쉽게 다듬되 문장 구조는 크게 바꾸지 않는다.",
             "strong": "강도: 적극. 뜻을 지키는 한에서 문장을 간결하게 다시 쓴다(길이 30%까지 줄여도 됨)."}
@@ -270,7 +270,7 @@ def polish(src_file, d, model, strength, preset, log, emit):
         log.append(f"[kordoc patch] exit {code} {out}")
         if code not in (0, 2) or not os.path.exists(out_path):  # 패치 자체가 실패하면 원본에서 텍스트 대조로만 반영
             shutil.copy(orig, out_path)
-        norm = lambda s: re.sub(r"\s+", " ", s).strip()
+        norm = lambda s: re.sub(r"\s+", " ", re.sub(r"\\([\\`*_{}\[\]()#+\-.!~|>])", r"\1", s)).strip()  # 마크다운 이스케이프(\~ 등) 무시
         back = lambda: norm(parse_to(out_path))
         cur = back()
         pending = [c for c in changes if norm(c["after"]) not in cur]
@@ -296,6 +296,141 @@ def polish(src_file, d, model, strength, preset, log, emit):
         if code == 0:
             vcode, vout = kordoc("validate", os.path.join(d, "03_result.hwpx")); log.append(f"[kordoc validate] exit {vcode} {vout}")
             res.update(hwpx="03_result.hwpx", valid=vcode == 0, preset=preset)
+    return res
+
+
+# ── 기안문 (표준 서식 채우기) ────────────────────────────────────────────
+# 기안문·간이기안문은 kordoc generate 프리셋 대신 kordoc 내장 표준 서식(행정 효율과 협업 촉진에 관한 규정 시행규칙 별지 제1·2호)을
+# 채운다. LLM 은 칸 값을 JSON 으로 쓰고, 비운 칸은 gian_defaults.json(기관명·주소·결재라인 등)으로 메운다.
+GIAN = {"기안문": ("gian", "일반기안문_서식.hwpx"), "간이기안문": ("gian_simple", "간이기안문_서식.hwpx")}
+TEMPLATES = os.path.join(ROOT, "node_modules", "kordoc", "templates")
+
+
+def gian_defaults():
+    try:
+        return {k: v for k, v in json.loads(read(os.path.join(ROOT, "gian_defaults.json"))).items() if not k.startswith("_")}
+    except FileNotFoundError:
+        return {}
+
+
+def gian_values(preset, answer):
+    """LLM JSON → 서식 칸 값. 붙임·끝. 처리: 붙임이 있으면 '붙임  ○○ 1부.  끝.', 없으면 본문 끝에 '  끝.'"""
+    m = re.search(r"\{.*\}", answer, re.S)
+    raw = json.loads(m.group(0)) if m else {}
+    v = {k: [str(i).strip() for i in x if str(i).strip()] if isinstance(x, list) else str(x or "").strip() for k, x in raw.items()}
+    for k, x in gian_defaults().items():
+        if not v.get(k): v[k] = x
+    for k in ("본문", "요약설명"):  # 표준 서식은 항목 사이 빈 줄 없음
+        if v.get(k): v[k] = re.sub(r"\n\s*\n+", "\n", v[k]).strip("\n")
+    att = []
+    if preset == "기안문":
+        att = v.pop("붙임", []) or []
+        if isinstance(att, str): att = [att]
+        att = [re.sub(r"\s*\d+\s*부\.?\s*(끝\.?)?\s*$", "", a) for a in att]
+        body = re.sub(r"\s*끝\.?\s*$", "", v.get("본문", "")).rstrip()
+        if att:
+            v["붙임"] = (f"{att[0]} 1부." if len(att) == 1 else "\n".join(f"{i}. {a} 1부." for i, a in enumerate(att, 1))) + "  끝."
+            v["본문"] = body
+        else:
+            v["붙임"], v["본문"] = "", body + "  끝."
+    elif not v.get("작성일"):
+        t = datetime.date.today(); v["작성일"] = f"{t.year}. {t.month}. {t.day}."
+    return v, att
+
+
+def gian_template(preset, has_att, dst):
+    """내장 서식 사본. 일반기안문의 고정 글자 '붙임  [칸]  1부.  끝.' 을 비워 붙임 줄을 값으로 직접 만든다."""
+    import zipfile
+    with zipfile.ZipFile(os.path.join(TEMPLATES, GIAN[preset][1])) as zi, zipfile.ZipFile(dst, "w") as zo:
+        for info in zi.infolist():
+            data = zi.read(info)
+            if preset == "기안문" and info.filename == "Contents/section0.xml":
+                x = data.decode("utf-8")
+                x = x.replace("<hp:t>  1부.  끝.</hp:t>", "<hp:t></hp:t>", 1)
+                if not has_att: x = x.replace("<hp:t>붙임  </hp:t>", "<hp:t></hp:t>", 1)
+                data = x.encode("utf-8")
+            zo.writestr(info, data)  # ZipInfo 그대로 → mimetype 무압축·순서 유지
+
+
+MARK = re.compile(r"^(\d+\.|[가-하]\.|\d+\)|[가-하]\)|\(\d+\)|\([가-하]\)|[-·○□ㅇ※])\s+")
+
+
+def _em(s):
+    """대략 글자 폭(em): 한글·전각 1, 그 밖(숫자·영문·기호·공백) 0.5"""
+    return sum(1 if ord(ch) > 0x2E7F else 0.5 for ch in s)
+
+
+def gian_indent(hwpx, field):
+    """누름틀 `field` 가 든 문단(줄바꿈으로 이은 본문)을 항목마다 문단으로 나누고 단계별 내어쓰기를 입힌다.
+       줄 앞 공백 2칸 = 한 단계(2em). 항목 기호 뒤 글자에 둘째 줄이 맞춰진다. 한글이 다시 조판하므로 줄 배치 캐시는 넣지 않는다."""
+    import zipfile, html as H
+    with zipfile.ZipFile(hwpx) as z:
+        infos, files = z.infolist(), {i.filename: z.read(i) for i in z.infolist()}
+    sec = files["Contents/section0.xml"].decode("utf-8"); hdr = files["Contents/header.xml"].decode("utf-8")
+    i = sec.find(f'name="{field}"')
+    if i < 0: return False
+    ps, pe = sec.rfind("<hp:p ", 0, i), sec.find("</hp:p>", i) + len("</hp:p>")
+    para = sec[ps:pe]
+    tm = re.search(r"<hp:t>(.*?)</hp:t>", para, re.S)
+    if not tm or "<hp:lineBreak/>" not in tm.group(1): return False
+    lines = [H.unescape(re.sub(r"<[^>]+>", "", x)) for x in tm.group(1).split("<hp:lineBreak/>")]
+    pid = re.search(r'paraPrIDRef="(\d+)"', para).group(1); cid = re.search(r'charPrIDRef="(\d+)"', para).group(1)
+    em = int(re.search(rf'<hh:charPr id="{cid}" height="(\d+)"', hdr).group(1))
+    base = re.search(rf'<hh:paraPr id="{pid}".*?</hh:paraPr>', hdr, re.S).group(0)
+    ids = [int(x) for x in re.findall(r'<hh:paraPr id="(\d+)"', hdr)]
+    made, new_pr, out = {}, [], []
+    for ln in lines:
+        if not ln.strip(): continue
+        lvl = (len(ln) - len(ln.lstrip(" "))) // 2; t = ln.strip()
+        m = MARK.match(t); hang = round(_em(m.group(0)) * em) if m else 0
+        key = (lvl, hang)
+        if key not in made:
+            nid = max(ids) + 1; ids.append(nid); made[key] = nid
+            left, intent = lvl * 2 * em, -hang  # 한글 내어쓰기: 첫 줄은 left, 둘째 줄부터 left + |intent|
+            pr = re.sub(r'<hh:paraPr id="\d+"', f'<hh:paraPr id="{nid}"', base, 1)
+            pr = re.sub(r'(<hh:align horizontal=")\w+', r'\1JUSTIFY', pr)  # 가운데 정렬 칸(간이기안문 요약설명)도 항목은 양쪽 정렬
+            pr = re.sub(r'<hc:intent value="-?\d+"', f'<hc:intent value="{intent}"', pr)
+            pr = re.sub(r'<hc:left value="-?\d+"', f'<hc:left value="{left}"', pr)
+            new_pr.append(pr)
+        out.append(f'<hp:p id="0" paraPrIDRef="{made[key]}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">'
+                   f'<hp:run charPrIDRef="{cid}"><hp:t>{H.escape(t, quote=False)}</hp:t></hp:run></hp:p>')
+    hdr = hdr.replace("</hh:paraProperties>", "".join(new_pr) + "</hh:paraProperties>", 1)
+    hdr = re.sub(r'<hh:paraProperties itemCnt="\d+"', f'<hh:paraProperties itemCnt="{len(ids)}"', hdr, 1)
+    files["Contents/section0.xml"] = (sec[:ps] + "".join(out) + sec[pe:]).encode("utf-8")
+    files["Contents/header.xml"] = hdr.encode("utf-8")
+    tmp = hwpx + ".tmp"
+    with zipfile.ZipFile(tmp, "w") as z:
+        for info in infos: z.writestr(info, files[info.filename])
+    os.replace(tmp, hwpx)
+    return True
+
+
+def gian_build(preset, answer, d, log, emit):
+    try:
+        v, att = gian_values(preset, answer)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"LLM 이 서식 칸 값을 JSON 으로 쓰지 못했습니다: {e}")
+    write(os.path.join(d, "02_fields.json"), json.dumps(v, ensure_ascii=False, indent=1))
+    body = v.get("본문") or v.get("요약설명") or ""
+    write(os.path.join(d, "02_body.md"), body)
+    emit({"stage": "lint", "msg": "kordoc lint (본문 표기법 검수)"})
+    _, out = kordoc("lint", "--json", *(["--munche"] if preset == "간이기안문" else []), os.path.join(d, "02_body.md"))
+    try: lint = json.loads(out[out.index("{"):])
+    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
+    emit({"stage": "fill", "msg": f"kordoc fill — 표준 {preset} 서식"})
+    tpl, hwpx = os.path.join(d, "02_template.hwpx"), os.path.join(d, "03_result.hwpx")
+    gian_template(preset, bool(att), tpl)
+    code, out = kordoc("fill", tpl, "-j", os.path.join(d, "02_fields.json"), "-o", hwpx)
+    log.append(f"[kordoc fill] exit {code} {out}")
+    res = {"lint": lint, "fields": v, "hwpx": None, "valid": None, "preset": preset}
+    if code == 0 and os.path.exists(hwpx):
+        field = "본문" if preset == "기안문" else "요약설명"
+        try:
+            log.append(f"[indent] {field} 항목별 문단·내어쓰기 {'적용' if gian_indent(hwpx, field) else '해당 없음'}")
+        except Exception as e:  # 실패해도 줄바꿈 본문으로 남긴다
+            log.append(f"[indent] 건너뜀: {type(e).__name__}: {e}")
+        vcode, vout = kordoc("validate", hwpx); log.append(f"[kordoc validate] exit {vcode} {vout}")
+        res.update(hwpx="03_result.hwpx", valid=vcode == 0, output=parse_to(hwpx).strip())
     return res
 
 
@@ -331,7 +466,8 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
             log.append(f"[truncate] {MAX_CHARS}자로 잘림 (MAX_CHARS 환경변수로 조정)")
 
     common, roles = prompts()
-    system = common + "\n\n" + roles[task]
+    gian = task == "draft" and preset in GIAN
+    system = common + "\n\n" + roles[GIAN[preset][0] if gian else task]
     user = (f"[문서 시작]\n{source}\n[문서 끝]" + ("\n(※ 문서가 길어 앞부분만 제공됨)" if truncated else "")
             if source else "[문서 없음]") + f"\n\n[요청]\n{question or {'summary': '요약해줘', 'qa': '핵심 내용은?', 'draft': '문서 내용으로 초안 작성'}[task]}"
     write(os.path.join(d, "01_prompt.txt"), user)
@@ -343,7 +479,9 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     result = {"run_id": run_id, "task": task, "model": model, "question": question, "file": os.path.basename(file) if file else None,
               "source": source, "truncated": truncated, "output": answer, "hwpx": None, "lint": None, "valid": None,
               "ts": datetime.datetime.now().isoformat(timespec="seconds")}
-    if task == "draft":
+    if gian:
+        result.update(gian_build(preset, answer, d, log, emit))
+    elif task == "draft":
         emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
         _, out = kordoc("lint", "--json", "--munche", os.path.join(d, "02_answer.md"))  # --munche: 개조식 문체(당위·서술형 종결)까지
         try:

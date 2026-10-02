@@ -57,7 +57,13 @@ python3 app.py --cli polish 문서.hwpx standard                           # 윤
 | 공문서 초안 | (문서) → LLM 이 kordoc 규약 Markdown 작성 → `kordoc lint --munche` 표기법·문체 검수 → `kordoc generate --preset` → `validate` → HWPX 내려받기 | 1 |
 | 윤문 | 문서 → `kordoc parse --keep-layout-tables` → 문단·목록·표 셀을 `[번호] 조각`으로 묶어(2,500자 단위, 2개 병렬) LLM 윤문 → 게이트(숫자·날짜·「」·영문·○○ 기호가 바뀌거나 길이가 0.55~1.5배를 벗어나면 원문 유지) → `kordoc lint` → **HWPX/HWP: `kordoc patch` 로 원본 서식 그대로 반영**, 위치 매핑이 잠긴 조각(표로 만든 제목 막대·요약 박스 안 등)은 `textpatch.mjs` 가 문단 텍스트 대조로 run·글자모양 유지한 채 반영 → 다시 파싱해 반영 여부 확인 → `validate`. 그 밖의 형식(PDF·DOCX·MD 등)은 서식을 되돌릴 원본이 없으므로 선택한 프리셋으로 새 HWPX 생성 | 문서 길이÷2,500자 |
 
-프리셋: 보고서 · 기안문 · 계획서 · 통지 · 회의록 · 개조식 · 업무보고 · 서울방침 · 보도자료.
+프리셋: 보고서 · 기안문 · 간이기안문 · 계획서 · 통지 · 회의록 · 개조식 · 업무보고 · 서울방침 · 보도자료.
+
+**기안문 · 간이기안문**은 `generate` 프리셋 대신 kordoc 내장 **표준 서식**(「행정 효율과 협업 촉진에 관한 규정 시행규칙」 별지 제1호 일반기안문 / 제2호 간이기안문)을 채운다.
+LLM 이 칸 값(행정기관명·수신·경유·제목·본문·붙임·발신명의·기안자·검토자·결재권자·시행번호·주소·연락처… / 간이: 제목·요약설명·작성기관)을 JSON 으로 쓰고 → `kordoc fill` →
+본문을 항목마다 문단으로 나눠 `1.` `가.` `1)` `가)` 단계별 **내어쓰기**(둘째 줄이 기호 뒤 글자에 맞춰짐) → `validate`.
+붙임이 있으면 `붙임  ○○ 1부.  끝.`(여러 개면 `1.` `2.` 번호), 없으면 본문 끝에 `  끝.`. 재료에 없는 이름·번호·주소는 지어내지 않고 빈칸(한글에서 누름틀 안내문이 보임)으로 둔다.
+기관 고정 값(기관명·발신명의·주소·전화·결재라인 등)은 `gian_defaults.example.json` 을 `gian_defaults.json` 으로 복사해 적어 두면 LLM 이 비운 칸을 채운다(문서에 나온 값이 우선).
 윤문은 별도 작업이 아니라 **결과 화면의 "✍ 윤문하기" 버튼**으로 한다: 초안을 만들었으면 그 HWPX를, 요약·질문이면 올렸던 원본 문서를,
 윤문 결과면 그 윤문본을 다시 다듬는다(`POST /api/run {"task":"polish","from_run":"<run>","strength":…}`). 내려받는 이름은 `<원본>_윤문.hwpx`.
 강도: 가볍게(맞춤법·띄어쓰기·이중 피동·비문만) · 보통 · 적극(간결하게 다시 쓰기). 웹 UI "변경 내역" 탭에서 조각별 원문/윤문 비교(어절 단위 강조)와 원문 유지된 제안·사유를 본다.
@@ -78,5 +84,5 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 ## 파일
 
-`app.py` 서버+파이프라인 · `textpatch.mjs` 윤문 보완 패치 · `ui.html` · `goal-prompt.md` 역할 프롬프트 4종 · `selftest.py` · `setup.sh`/`setup.ps1` 원샷 설치 · `pack.sh` 폐쇄망 번들 ·
+`app.py` 서버+파이프라인 · `textpatch.mjs` 윤문 보완 패치 · `gian_defaults.example.json` 기안문 기관 고정 값 예시 · `ui.html` · `goal-prompt.md` 역할 프롬프트 6종 · `selftest.py` · `setup.sh`/`setup.ps1` 원샷 설치 · `pack.sh` 폐쇄망 번들 ·
 `sample/dummy.hwpx` · `sample/polish_test.hwpx`(+`.md`, 윤문 테스트용 계획서) · `package.json`(kordoc ^4.17). 출처·라이선스는 `NOTICE`.

@@ -7,3 +7,4 @@ server.log
 server.err.log
 node/
 app.log
+gian_defaults.json
