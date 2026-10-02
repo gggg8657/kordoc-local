@@ -678,6 +678,17 @@ class H(BaseHTTPRequestHandler):
                 return self._send({"error": str(e)}, code=400)
         if not file and not (req.get("question") or "").strip():
             return self._send({"error": "문서나 요청 중 하나는 있어야 합니다"}, code=400)
+        temp_form, form_meta = None, None
+        if task == "draft" and req.get("form_b64"):  # 초안 화면에서 바로 넣은 양식 — 없으면 프리셋 목록에서 고른 것
+            fname = req.get("form_name") or ""
+            if not fname.lower().endswith(".hwpx"):
+                return self._send({"error": f"양식은 HWPX 파일만 받습니다({os.path.splitext(fname)[1] or '확장자 없음'}). " + forms.HOWTO}, code=400)
+            try:
+                form_meta = forms.register(os.path.splitext(os.path.basename(fname))[0][:60], base64.b64decode(req["form_b64"]), kordoc)
+            except ValueError as e:
+                return self._send({"error": str(e)}, code=400)
+            req["preset"] = "form:" + form_meta["id"]
+            if not req.get("form_save"): temp_form = form_meta["id"]
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -688,6 +699,9 @@ class H(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
+            if form_meta:
+                kinds = {"fill": "칸 채우기형", "body": "본문 작성형"}
+                emit({"stage": "form", "msg": f"양식 분석: {form_meta['name']} — {kinds[form_meta['kind']]}" + ("" if temp_form else " (양식 목록에 저장)")})
             emit({"done": process(task, (req.get("question") or "").strip(), file, req.get("model") or MODEL,
                                   req.get("preset") or "보고서", emit, req.get("strength") or "standard")})
         except Exception as e:
@@ -695,6 +709,8 @@ class H(BaseHTTPRequestHandler):
         finally:
             if file:
                 os.remove(file)
+            if temp_form:
+                forms.remove(temp_form)
 
 
 if __name__ == "__main__":
