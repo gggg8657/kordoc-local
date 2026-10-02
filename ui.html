@@ -33,6 +33,9 @@
   <input type="file" id="file" accept=".hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.md,.txt">
   <label>작업 <select id="task"><option value="summary">요약<option value="qa">질문</option><option value="draft">공문서 초안 → HWPX</option></select></label>
   <label id="presetL" hidden>프리셋 <select id="preset"><optgroup label="연구원 양식" id="formOpts"></optgroup><optgroup label="공문서 프리셋"><option>보고서<option>기안문<option>간이기안문<option>계획서<option>통지<option>회의록<option>개조식<option>업무보고<option>서울방침<option>보도자료</optgroup></select></label>
+  <label id="formInL" hidden title="양식 HWPX를 넣으면 그 양식으로 만들고, 안 넣으면 왼쪽에서 고른 프리셋·양식을 씁니다">양식 파일 <input type="file" id="formIn" accept=".hwpx,.hwp,.doc,.docx"></label>
+  <label id="formSaveL" hidden style="font-size:13px"><input type="checkbox" id="formSave" checked> 양식 목록에 저장</label>
+  <span id="formInMsg" style="font-size:13px"></span>
   <label>모델 <select id="model"></select></label>
 </div>
 <textarea id="q" placeholder="질문 또는 요청 (요약은 비워도 됨). 예: 3장 예산 총액은? / ○○ 개선방안 보고서 초안 써줘"></textarea>
@@ -78,7 +81,15 @@ const MODEL_DEFAULT = %MODEL%;
 fetch('api/models').then(r => r.json()).then(ms => {
   $('model').innerHTML = ms.map(m => `<option ${m === MODEL_DEFAULT ? 'selected' : ''}>${m}</option>`).join('');
 }).catch(() => $('status').textContent = 'Ollama에 연결할 수 없습니다 (localhost:11434)');
-$('task').onchange = () => $('presetL').hidden = $('task').value !== 'draft';
+$('task').onchange = () => { const d = $('task').value !== 'draft'; $('presetL').hidden = $('formInL').hidden = d; $('formSaveL').hidden = d || !$('formIn').files[0]; };
+$('formIn').onchange = () => {
+  const f = $('formIn').files[0];
+  if (f && !/\.hwpx$/i.test(f.name)) {
+    $('formInMsg').innerHTML = '<span class="badge warn">HWPX만 받아요</span> 한글에서 <b>파일 → 다른 이름으로 저장 → 파일 형식: HWPX 문서</b>로 저장해 넣어 주세요.';
+    $('formIn').value = '';
+  } else $('formInMsg').innerHTML = f ? '<span class="badge ok">이 양식으로 만들어요</span>' : '';
+  const on = !!$('formIn').files[0]; $('preset').disabled = on; $('formSaveL').hidden = !on;
+};
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   document.querySelectorAll('.tabs button, .pane').forEach(e => e.classList.remove('on'));
   b.classList.add('on'); $('p-' + b.dataset.t).classList.add('on');
@@ -140,21 +151,21 @@ loadRuns();
 
 const KIND = { fill: '칸 채우기', body: '본문 작성' };
 async function loadForms() {
-  const fs = await fetch('/api/forms').then(r => r.json());
+  const fs = await fetch('api/forms').then(r => r.json());
   $('formOpts').innerHTML = fs.map(f => `<option value="form:${f.id}">${esc(f.name)}</option>`).join('');
   $('formList').innerHTML = fs.length ? `<tr><th>이름</th><th>종류</th><th>인식한 것</th><th></th></tr>` + fs.map(f => `<tr><td>${esc(f.name)}</td>
     <td><select data-id="${f.id}" class="fkind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === f.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
     <td style="font-size:13px;color:var(--muted)">${f.kind === 'fill' ? `칸 ${f.fields.length}개${f.boxes.length ? ' · 큰 칸 ' + f.boxes.length : ''}` : `견본 ${Object.entries(f.roles).map(([k, v]) => ({ chapter: 'Ⅰ장', l1: '□', l2: '○', l3: '-', l4: '·', note: '※', caption: '표제목', table: '표', refbox: '참고상자' }[k])).join(' ')} · 앞부분 ${f.front.length}곳`}</td>
     <td><button data-del="${f.id}">삭제</button></td></tr>`).join('') : '<tr><td>올린 양식이 없어요</td></tr>';
-  document.querySelectorAll('.fkind').forEach(s => s.onchange = () => fetch('/api/forms/kind', { method: 'POST', body: JSON.stringify({ id: s.dataset.id, kind: s.value }) }).then(loadForms));
-  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('이 양식을 삭제할까요?')) { await fetch('/api/forms/delete', { method: 'POST', body: JSON.stringify({ id: b.dataset.del }) }); loadForms(); } });
+  document.querySelectorAll('.fkind').forEach(s => s.onchange = () => fetch('api/forms/kind', { method: 'POST', body: JSON.stringify({ id: s.dataset.id, kind: s.value }) }).then(loadForms));
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('이 양식을 삭제할까요?')) { await fetch('api/forms/delete', { method: 'POST', body: JSON.stringify({ id: b.dataset.del }) }); loadForms(); } });
 }
 loadForms();
 $('formUp').onclick = async () => {
   const f = $('formFile').files[0]; if (!f) { $('formMsg').textContent = '파일을 고르세요'; return; }
   if (!/\.hwpx$/i.test(f.name)) { $('formMsg').innerHTML = '<span class="badge warn">HWPX만 받아요</span> 한글에서 <b>파일 → 다른 이름으로 저장 → 파일 형식: HWPX 문서</b>로 저장해 올려 주세요.'; return; }
   $('formMsg').textContent = '분석 중…';
-  const r = await fetch('/api/forms', { method: 'POST', body: JSON.stringify({ name: $('formName').value.trim(), file_name: f.name, file_b64: await b64(f) }) }).then(r => r.json());
+  const r = await fetch('api/forms', { method: 'POST', body: JSON.stringify({ name: $('formName').value.trim(), file_name: f.name, file_b64: await b64(f) }) }).then(r => r.json());
   $('formMsg').innerHTML = r.error ? `<span class="badge bad">${esc(r.error)}</span>` : `<span class="badge ok">등록: ${esc(r.name)} — ${KIND[r.kind]}</span>`;
   $('formFile').value = ''; $('formName').value = ''; loadForms();
 };
@@ -165,6 +176,8 @@ $('go').onclick = async () => {
   const f = $('file').files[0], question = $('q').value.trim();
   if (!f && !question) { $('status').textContent = '문서를 고르거나 요청을 쓰세요'; return; }
   const body = { task: $('task').value, question, model: $('model').value, preset: $('preset').value };
+  const ff = body.task === 'draft' && $('formIn').files[0];
+  if (ff) { body.form_name = ff.name; body.form_b64 = await b64(ff); body.form_save = $('formSave').checked; }
   if (f) { body.file_name = f.name; body.file_b64 = await b64(f); }
   run(body);
 };
@@ -175,6 +188,7 @@ async function run(body) {
   const t0 = Date.now();
   try {
     const r = await fetch('api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
@@ -186,7 +200,7 @@ async function run(body) {
         if (ev.stage) { $('stages').innerHTML += `<b>${ev.stage}</b> ${ev.msg} · `; if (ev.reset) $('out').value = ''; }
         if (ev.token) { $('out').value += ev.token; $('out').scrollTop = $('out').scrollHeight; }
         if (ev.error) throw new Error(ev.error);
-        if (ev.done) { show(ev.done); loadRuns(); }
+        if (ev.done) { show(ev.done); loadRuns(); if (body.form_b64) { loadForms(); $('formIn').value = ''; $('formIn').onchange(); } }
       }
     }
     $('status').textContent = `완료 ${((Date.now() - t0) / 1000).toFixed(0)}초`;
