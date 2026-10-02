@@ -307,10 +307,12 @@ TEMPLATES = os.path.join(ROOT, "node_modules", "kordoc", "templates")
 
 
 def gian_defaults():
+    """(값, 고정 키). 고정 키는 문서 내용과 상관없이 덮어쓰고, 나머지는 LLM 이 비운 칸만 채운다."""
     try:
-        return {k: v for k, v in json.loads(read(os.path.join(ROOT, "gian_defaults.json"))).items() if not k.startswith("_")}
+        raw = json.loads(read(os.path.join(ROOT, "gian_defaults.json")))
     except FileNotFoundError:
-        return {}
+        return {}, set()
+    return {k: v for k, v in raw.items() if not k.startswith("_")}, set(raw.get("_고정") or [])
 
 
 def gian_values(preset, answer):
@@ -318,8 +320,12 @@ def gian_values(preset, answer):
     m = re.search(r"\{.*\}", answer, re.S)
     raw = json.loads(m.group(0)) if m else {}
     v = {k: [str(i).strip() for i in x if str(i).strip()] if isinstance(x, list) else str(x or "").strip() for k, x in raw.items()}
-    for k, x in gian_defaults().items():
-        if not v.get(k): v[k] = x
+    dv, fixed = gian_defaults()
+    for k, x in dv.items():
+        if k in fixed or not v.get(k): v[k] = x
+    org = dv.get("행정기관명")
+    if preset == "간이기안문" and org and v.get("작성기관") and not v["작성기관"].startswith(org):
+        v["작성기관"] = f"{org} {v['작성기관']}"  # 부서만 썼으면 기관명을 앞에
     for k in ("본문", "요약설명"):  # 표준 서식은 항목 사이 빈 줄 없음
         if v.get(k): v[k] = re.sub(r"\n\s*\n+", "\n", v[k]).strip("\n")
     att = []
