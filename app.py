@@ -41,7 +41,7 @@ TASKS = ("summary", "qa", "draft", "polish")
 PRESETS = ("보고서", "기안문", "간이기안문", "계획서", "통지", "회의록", "개조식", "업무보고", "서울방침", "보도자료")
 EXTS = (".hwp", ".hwpx", ".hml", ".pdf", ".docx", ".xlsx", ".xls", ".png", ".jpg", ".jpeg", ".webp", ".md", ".txt")
 _CLI = os.path.join(ROOT, "node_modules", "kordoc", "dist", "cli.js")
-KORDOC = ["node", _CLI] if os.path.exists(_CLI) else ["npx", "-y", "kordoc@^4"]
+KORDOC = ["node", _CLI]  # npx 폴백 없음: 폐쇄망에서 npx 는 무한 대기한다. 없으면 기동 시 안내 후 종료
 
 
 def read(p):
@@ -57,6 +57,15 @@ def write(p, s):
 def kordoc(*args, cwd=None):
     r = subprocess.run([*KORDOC, *args], capture_output=True, text=True, cwd=cwd or ROOT, timeout=600)
     return r.returncode, (r.stdout + r.stderr).strip()
+
+
+def lint(path, *opts):
+    """kordoc lint --json → dict (파싱 실패 시 {"raw": ...})."""
+    _, out = kordoc("lint", "--json", *opts, path)
+    try:
+        return json.loads(out[out.index("{"):])
+    except (ValueError, json.JSONDecodeError):
+        return {"raw": out}
 
 
 # ── Ollama ──────────────────────────────────────────────────────────────
@@ -257,10 +266,8 @@ def polish(src_file, d, model, strength, preset, log, emit):
     polished = "\n".join(lines)
     write(os.path.join(d, "02_polished.md"), polished)
     emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
-    _, out = kordoc("lint", "--json", os.path.join(d, "02_polished.md"))
-    try: lint = json.loads(out[out.index("{"):])
-    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
-    res = {"source": source, "output": polished, "changes": changes, "rejected": rejected, "units": len(us), "lint": lint,
+    lint_r = lint(os.path.join(d, "02_polished.md"))
+    res = {"source": source, "output": polished, "changes": changes, "rejected": rejected, "units": len(us), "lint": lint_r,
            "strength": strength, "hwpx": None, "valid": None, "mode": "patch" if patchable else "generate"}
     if patchable:
         name, orig = "03_result" + ext, os.path.join(d, os.path.basename(src_file))
@@ -420,15 +427,13 @@ def gian_build(preset, answer, d, log, emit):
     body = v.get("본문") or v.get("요약설명") or ""
     write(os.path.join(d, "02_body.md"), body)
     emit({"stage": "lint", "msg": "kordoc lint (본문 표기법 검수)"})
-    _, out = kordoc("lint", "--json", *(["--munche"] if preset == "간이기안문" else []), os.path.join(d, "02_body.md"))
-    try: lint = json.loads(out[out.index("{"):])
-    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
+    lint_r = lint(os.path.join(d, "02_body.md"), *(["--munche"] if preset == "간이기안문" else []))
     emit({"stage": "fill", "msg": f"kordoc fill — 표준 {preset} 서식"})
     tpl, hwpx = os.path.join(d, "02_template.hwpx"), os.path.join(d, "03_result.hwpx")
     gian_template(preset, bool(att), tpl)
     code, out = kordoc("fill", tpl, "-j", os.path.join(d, "02_fields.json"), "-o", hwpx)
     log.append(f"[kordoc fill] exit {code} {out}")
-    res = {"lint": lint, "fields": v, "hwpx": None, "valid": None, "preset": preset}
+    res = {"lint": lint_r, "fields": v, "hwpx": None, "valid": None, "preset": preset}
     if code == 0 and os.path.exists(hwpx):
         field = "본문" if preset == "기안문" else "요약설명"
         try:
@@ -489,11 +494,7 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
         result.update(gian_build(preset, answer, d, log, emit))
     elif task == "draft":
         emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
-        _, out = kordoc("lint", "--json", "--munche", os.path.join(d, "02_answer.md"))  # --munche: 개조식 문체(당위·서술형 종결)까지
-        try:
-            result["lint"] = json.loads(out[out.index("{"):])
-        except (ValueError, json.JSONDecodeError):
-            result["lint"] = {"raw": out}
+        result["lint"] = lint(os.path.join(d, "02_answer.md"), "--munche")  # --munche: 개조식 문체(당위·서술형 종결)까지
         emit({"stage": "generate", "msg": f"kordoc generate --preset {preset}"})
         hwpx = os.path.join(d, "03_result.hwpx")
         code, out = kordoc("generate", os.path.join(d, "02_answer.md"), "-o", hwpx, "--preset", preset)
@@ -638,6 +639,6 @@ if __name__ == "__main__":
         print(json.dumps(r, ensure_ascii=False, indent=1))
         sys.exit(0 if r["task"] not in ("draft", "polish") or r["valid"] else 2)
     if not os.path.exists(_CLI):
-        print("경고: node_modules/kordoc 없음 → npx 로 대체 (느림). 이 폴더에서 `npm install` 권장", file=sys.stderr)
+        sys.exit("node_modules/kordoc 없음 — 이 폴더에서 `npm install` 또는 pack.sh 번들을 쓰세요")
     print(f"kordoc local → http://localhost:{PORT}  (model={MODEL}, llm={LLM_API} {LLM_BASE}, kordoc={' '.join(KORDOC[:2])})")
     ThreadingHTTPServer(("", PORT), H).serve_forever()
