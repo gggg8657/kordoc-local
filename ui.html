@@ -67,7 +67,7 @@
 <script>
 const $ = id => document.getElementById(id);
 const MODEL_DEFAULT = %MODEL%;
-fetch('/api/models').then(r => r.json()).then(ms => {
+fetch('api/models').then(r => r.json()).then(ms => {
   $('model').innerHTML = ms.map(m => `<option ${m === MODEL_DEFAULT ? 'selected' : ''}>${m}</option>`).join('');
 }).catch(() => $('status').textContent = 'Ollama에 연결할 수 없습니다 (localhost:11434)');
 $('task').onchange = () => $('presetL').hidden = $('task').value !== 'draft';
@@ -84,7 +84,7 @@ function show(j) {
   if (j.task === 'draft') {
     const l = j.lint && j.lint.summary;
     m += l ? `<span class="badge ${l.errors ? 'warn' : 'ok'}">표기법 ${l.errors ? l.errors + '건 수정 필요' : '통과'}</span>` : '';
-    m += j.hwpx ? `<span class="badge ${j.valid ? 'ok' : 'bad'}">HWPX ${j.valid ? '검증 통과' : '검증 실패'}</span> <a href="/api/runs/${j.run_id}/03_result.hwpx">⬇ ${j.preset}.hwpx 내려받기</a>`
+    m += j.hwpx ? `<span class="badge ${j.valid ? 'ok' : 'bad'}">HWPX ${j.valid ? '검증 통과' : '검증 실패'}</span> <a href="api/runs/${j.run_id}/03_result.hwpx">⬇ ${j.preset}.hwpx 내려받기</a>`
                 : '<span class="badge bad">HWPX 생성 실패 (로그 확인)</span>';
   }
   if (j.task === 'polish') {
@@ -92,7 +92,7 @@ function show(j) {
     m += `<span class="badge ok">${j.units}조각 중 ${n}곳 윤문 · ${j.applied ?? n}곳 반영</span>`;
     if (j.rejected.length) m += `<span class="badge warn">${j.rejected.length}곳 원문 유지 (숫자·고유 표기 보호)</span>`;
     if (l) m += `<span class="badge ${l.errors ? 'warn' : 'ok'}">표기법 ${l.errors ? l.errors + '건 확인 필요' : '통과'}</span>`;
-    m += j.hwpx ? `<span class="badge ${j.valid ? 'ok' : 'warn'}">${j.mode === 'patch' ? '원본 서식 유지' : j.preset + ' 프리셋으로 새로 생성'} · ${j.valid ? '검증 통과' : '일부 미반영'}</span> <a href="/api/runs/${j.run_id}/${j.hwpx}">⬇ 윤문본 ${j.hwpx.split('.').pop().toUpperCase()} 내려받기</a>`
+    m += j.hwpx ? `<span class="badge ${j.valid ? 'ok' : 'warn'}">${j.mode === 'patch' ? '원본 서식 유지' : j.preset + ' 프리셋으로 새로 생성'} · ${j.valid ? '검증 통과' : '일부 미반영'}</span> <a href="api/runs/${j.run_id}/${j.hwpx}">⬇ 윤문본 ${j.hwpx.split('.').pop().toUpperCase()} 내려받기</a>`
                 : '<span class="badge bad">문서 생성 실패 (로그 확인)</span>';
     const tr = (c, extra) => `<tr><td class="n">${c.n + 1}</td><td>${diff(c.before, c.after, 0)}</td><td>${diff(c.before, c.after, 1)}</td><td>${extra}</td></tr>`;
     $('chg').innerHTML = `<table class="cg"><tr><th></th><th>원문</th><th>윤문</th><th></th></tr>${j.changes.map(c => tr(c, c.applied === false ? '<span class="badge warn">미반영</span>' : '')).join('') || '<tr><td colspan=4>고친 곳 없음</td></tr>'}</table>`
@@ -121,11 +121,11 @@ function diff(a, b, side) {  // 어절 단위 LCS — side 0: 원문(지운 곳)
   return o;
 }
 async function loadRuns() {
-  const rs = await fetch('/api/runs').then(r => r.json());
+  const rs = await fetch('api/runs').then(r => r.json());
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   $('runs').innerHTML = rs.map(r => `<li data-id="${r.run_id}">${r.ts} · ${r.task} · ${r.model} · ${esc(r.file || '-')} · ${esc(r.head)}…</li>`).join('') || '<li>없음</li>';
   $('runs').querySelectorAll('li[data-id]').forEach(li => li.onclick = async () => {
-    const j = await fetch('/api/runs/' + li.dataset.id).then(r => r.json()); $('q').value = j.question || ''; show(j);
+    const j = await fetch('api/runs/' + li.dataset.id).then(r => r.json()); $('q').value = j.question || ''; show(j);
   });
 }
 loadRuns();
@@ -145,7 +145,7 @@ async function run(body) {
   $('status').textContent = body.task === 'polish' ? '윤문 중 — 문서 길이에 따라 수십 초~수 분' : '실행 중 — 로컬 모델은 수 분 걸릴 수 있습니다';
   const t0 = Date.now();
   try {
-    const r = await fetch('/api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch('api/run', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = '';
     while (true) {
       const { value, done } = await reader.read(); if (done) break;
