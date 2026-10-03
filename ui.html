@@ -122,7 +122,8 @@ function diff(a, b, side) {  // 어절 단위 LCS — side 0: 원문(지운 곳)
 }
 async function loadRuns() {
   const rs = await fetch('/api/runs').then(r => r.json());
-  $('runs').innerHTML = rs.map(r => `<li data-id="${r.run_id}">${r.ts} · ${r.task} · ${r.model} · ${r.file || '-'} · ${r.head}…</li>`).join('') || '<li>없음</li>';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  $('runs').innerHTML = rs.map(r => `<li data-id="${r.run_id}">${r.ts} · ${r.task} · ${r.model} · ${esc(r.file || '-')} · ${esc(r.head)}…</li>`).join('') || '<li>없음</li>';
   $('runs').querySelectorAll('li[data-id]').forEach(li => li.onclick = async () => {
     const j = await fetch('/api/runs/' + li.dataset.id).then(r => r.json()); $('q').value = j.question || ''; show(j);
   });
