@@ -94,3 +94,6 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 `app.py` 서버+파이프라인 · `forms.py` 연구원 양식 등록·채우기 · `textpatch.mjs` 윤문 보완 패치 · `gian_defaults.example.json` 기안문 기관 고정 값 예시 · `ui.html` · `goal-prompt.md` 역할 프롬프트 8종 · `selftest.py` · `setup.sh`/`setup.ps1` 원샷 설치 · `pack.sh` 폐쇄망 번들 ·
 `sample/dummy.hwpx` · `sample/polish_test.hwpx`(+`.md`, 윤문 테스트용 계획서) · `package.json`(kordoc ^4.17). 출처·라이선스는 `NOTICE`.
+
+### 다른 도구용 글 윤문 API
+`POST /api/polish_text {"text": …, "strength": "light|standard|strong"}` → `{output, changes, rejected, units}`. 문서 윤문과 같은 엔진(조각 윤문 + 숫자·날짜·「」·영문·쌍점이 바뀐 조각은 원문 유지). writer·notebook·meeting 의 "✍ 윤문하기" 버튼이 이걸 부른다.

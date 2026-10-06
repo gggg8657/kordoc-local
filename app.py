@@ -230,12 +230,10 @@ def polish_batch(units, model, strength, system):
     return got
 
 
-def polish(src_file, d, model, strength, preset, log, emit):
+def polish_md(source, model, strength, log, emit=lambda ev: None):
+    """윤문 핵심: 마크다운 글 → (윤문한 글, 바꾼 조각, 원문 유지한 조각, 조각 수). 문서 윤문과 다른 도구의 글 윤문(api/polish_text)이 같이 쓴다."""
     from concurrent.futures import ThreadPoolExecutor
     import difflib
-    ext = os.path.splitext(src_file)[1].lower()
-    patchable = ext in PATCHABLE
-    source = parse(src_file, d, log, *(["--keep-layout-tables"] if patchable else []))
     lines = source.split("\n")
     us = units_of(source)
     emit({"stage": "split", "msg": f"윤문 대상 {len(us)}조각 (문단·목록·표 셀)"})
@@ -265,11 +263,27 @@ def polish(src_file, d, model, strength, preset, log, emit):
         lines[i] = lines[i][:st] + new + lines[i][en:]
         changes.append({"n": n, "before": t, "after": new, "ratio": round(1 - difflib.SequenceMatcher(None, t, new).ratio(), 2)})
     changes.reverse(); rejected.reverse()
-    polished = "\n".join(lines)
+    return "\n".join(lines), changes, rejected, len(us)
+
+
+def polish_text(text, model=MODEL, strength="standard"):
+    """다른 도구(writer·notebook·meeting)가 부르는 글 윤문 — 파일 없이 글만. 결과 글과 바뀐 곳·원문 유지한 곳"""
+    if not (text or "").strip(): raise ValueError("빈 글")
+    if strength not in STRENGTH: strength = "standard"
+    log = []
+    out, changes, rejected, units = polish_md(text, model, strength, log)
+    return {"output": out, "changes": changes, "rejected": rejected, "units": units, "strength": strength, "model": model, "log": "\n".join(log)}
+
+
+def polish(src_file, d, model, strength, preset, log, emit):
+    ext = os.path.splitext(src_file)[1].lower()
+    patchable = ext in PATCHABLE
+    source = parse(src_file, d, log, *(["--keep-layout-tables"] if patchable else []))
+    polished, changes, rejected, n_units = polish_md(source, model, strength, log, emit)
     write(os.path.join(d, "02_polished.md"), polished)
     emit({"stage": "lint", "msg": "kordoc lint (표기법 검수)"})
     lint_r = lint(os.path.join(d, "02_polished.md"))
-    res = {"source": source, "output": polished, "changes": changes, "rejected": rejected, "units": len(us), "lint": lint_r,
+    res = {"source": source, "output": polished, "changes": changes, "rejected": rejected, "units": n_units, "lint": lint_r,
            "strength": strength, "hwpx": None, "valid": None, "mode": "patch" if patchable else "generate"}
     if patchable:
         name, orig = "03_result" + ext, os.path.join(d, os.path.basename(src_file))
@@ -649,6 +663,13 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/api/polish_text":  # 다른 도구의 "윤문하기" (writer·notebook·meeting) — JSON 한 번에
+            try:
+                return self._send(polish_text(req.get("text") or "", req.get("model") or MODEL, req.get("strength") or "standard"))
+            except ValueError as e:
+                return self._send({"error": str(e)}, code=400)
+            except Exception as e:
+                return self._send({"error": f"{type(e).__name__}: {e}"}, code=500)
         if self.path.startswith("/api/forms"):  # 양식 등록·삭제·종류 변경
             try:
                 if self.path == "/api/forms":

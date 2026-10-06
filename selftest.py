@@ -114,6 +114,11 @@ assert r["valid"] and "시험 제목" in r["output"], r["output"][:300]
 assert app.forms.remove(g["id"])["ok"] and len(app.forms.listing()) == 1
 _sh.rmtree(app.forms.DIR)
 
+# 9) 글 윤문 API(다른 도구의 "윤문하기"): 파일 없이 글만, 숫자를 바꾼 제안은 원문 유지
+app.ollama = fake_polish
+r = app.polish_text("ㅇ 수작업 위주로 진행되어지고 있음\nㅇ 약 42%가 검토 중임")
+assert "진행되고 있음" in r["output"] and "42%" in r["output"] and r["rejected"] and r["units"] == 2, r
+
 # 저작권 표기: ui.html 에서 지워도 서버가 다시 붙인다 (LICENSE·NOTICE)
 import base64 as _b
 _h = app.signed(app.HTML.replace("data-sig", "").replace('name="author"', ""))
