@@ -97,3 +97,12 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 ### 다른 도구용 글 윤문 API
 `POST /api/polish_text {"text": …, "strength": "light|standard|strong"}` → `{output, changes, rejected, units}`. 문서 윤문과 같은 엔진(조각 윤문 + 숫자·날짜·「」·영문·쌍점이 바뀐 조각은 원문 유지). writer·notebook·meeting 의 "✍ 윤문하기" 버튼이 이걸 부른다.
+
+## 출처·감사 (Credits)
+
+- **[kordoc](https://github.com/chrisryugj/kordoc) (MIT, chrisryugj)** — npm 에서 수정 없이 설치해 감쌉니다 (`LICENSE-kordoc`). `sample/dummy.hwpx` 는 kordoc 의 tests/fixtures 에서 가져옴
+- OCR 모델 PP-OCRv5 ([PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), Apache-2.0) — kordoc 의 NOTICE·THIRD_PARTY 참고
+- **LLM 실행** — OpenAI 호환 API 로 호출합니다(모델 가중치는 동봉하지 않음). 기본 배포는 [Ollama](https://github.com/ollama/ollama) (MIT) 위의 Google [Gemma](https://ai.google.dev/gemma) `gemma4:31b` — 모델 이용 조건은 Gemma 배포처 참고.
+- 이 도구는 [agent-page-portal](https://github.com/gggg8657/agent-page-portal) 에 연결해 쓰도록 만들었습니다(단독 실행도 됨).
+
+저작권 표기·전체 목록은 `NOTICE` 를 보세요.
