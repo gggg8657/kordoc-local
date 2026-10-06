@@ -14,7 +14,7 @@ import secrets
 import zipfile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-DIR = os.path.join(ROOT, "forms")
+DIR = os.path.join(os.environ.get("WORKSPACE") or ROOT, "forms")  # 포털에서는 AGENT_DATA/<도구>/forms
 SEC = "Contents/section0.xml"
 ROMAN = "ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ"
 MARKS = [("l1", "□"), ("l1", "■"), ("l2", "○"), ("l2", "ㅇ"), ("l2", "◦"), ("l3", "-"), ("l3", "–"), ("l4", "·"), ("l4", "∙"), ("note", "※")]
