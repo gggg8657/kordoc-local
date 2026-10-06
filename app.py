@@ -442,11 +442,9 @@ def form_build(form, answer, d, log, emit):
         log.append(f"[form body] 앞부분 {info['front']}칸, 본문 {info['lines']}줄")
         body = "\n".join(map(str, lines))
     write(os.path.join(d, "02_body.md"), body)
-    _, out = kordoc("lint", "--json", os.path.join(d, "02_body.md"))
-    try: lint = json.loads(out[out.index("{"):])
-    except (ValueError, json.JSONDecodeError): lint = {"raw": out}
+    lint_r = lint(os.path.join(d, "02_body.md"))
     vcode, vout = kordoc("validate", hwpx); log.append(f"[kordoc validate] exit {vcode} {vout}")
-    return {"lint": lint, "fields": v, "hwpx": "03_result.hwpx", "valid": vcode == 0, "preset": meta["name"], "form": meta["id"],
+    return {"lint": lint_r, "fields": v, "hwpx": "03_result.hwpx", "valid": vcode == 0, "preset": meta["name"], "form": meta["id"],
             "output": parse_to(hwpx).strip()}
 
 
