@@ -25,6 +25,9 @@
   table.cg th{font-size:12px;color:var(--muted)}table.cg td.n{color:var(--muted);width:2em}del{background:#fde2e2;text-decoration:line-through;color:#a33}ins{background:#dff5e1;text-decoration:none;color:#1a6b2a}
   #runs{font-size:13px}#runs li{cursor:pointer;padding:3px 0;list-style:none}#runs li:hover{color:var(--acc)}
   details{margin-top:14px}summary{cursor:pointer;color:var(--muted);font-size:13px}
+  /* 넘침 방지: 긴 단어(URL·파일명)·표 줄바꿈, 탭 줄바꿈 */
+  #meta,#runs,#stages,#status,#chg,#formMsg,#formInMsg,#polishWhat,table.cg td{overflow-wrap:anywhere}.badge{max-width:100%;overflow-wrap:anywhere}.tabs{flex-wrap:wrap}
+  #formName{min-width:0!important;max-width:100%}table.cg td:last-child:not(:first-child){min-width:4.5em}input[type=file]{max-width:100%}
 </style>
 
 <h1>kordoc local <small>— HWP·HWPX·PDF·DOCX·XLSX → 로컬 Ollama 요약 · 질문 · 공문서 초안(HWPX) · 윤문(원본 서식 유지)</small></h1>

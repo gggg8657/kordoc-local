@@ -604,8 +604,8 @@ HTML = read(os.path.join(ROOT, "ui.html")) if os.path.exists(os.path.join(ROOT, 
 RUN_RE = r"\d{4}-\d{2}-\d{2}-[0-9a-f]{4}"
 
 # ── 저작권 표기 (LICENSE·NOTICE 참고) ─────────────────────────────────────
-_SIG = __import__("base64").b64decode("wqkgMjAyNiDquYDrj5nso7wgwrcgZG9uZ2p1a2ltLmRldkBnbWFpbC5jb20=").decode()
-_SIG_A = __import__("base64").b64decode("RG9uZ0p1IEtpbSA8ZG9uZ2p1a2ltLmRldkBnbWFpbC5jb20+").decode()
+_SIG = __import__("base64").b64decode("wqkgMjAyNiBnZ2dnODY1NyDCtyBkb25nanVraW0uZGV2QGdtYWlsLmNvbQ==").decode()
+_SIG_A = __import__("base64").b64decode("Z2dnZzg2NTcgPGRvbmdqdWtpbS5kZXZAZ21haWwuY29tPg==").decode()
 
 
 def signed(html):
