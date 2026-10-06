@@ -169,7 +169,7 @@ ok "$MODEL"
 
 # ── 7. 자가검증 ──────────────────────────────────────────────────────────
 step "자가검증"
-spin "kordoc 왕복 (HWPX→MD→lint→generate→validate)" "$PY" selftest.py || die "selftest 실패 — node_modules/kordoc 또는 sample/ 이 빠졌는지 확인"
+spin "kordoc 왕복 (HWPX→MD→lint→generate→validate)" env -u WORKSPACE "$PY" selftest.py || die "selftest 실패 — node_modules/kordoc 또는 sample/ 이 빠졌는지 확인"
 ok "파싱·표기법 검수·HWPX 생성·구조 검증 통과"
 
 # ── 8. 웹 서버 ───────────────────────────────────────────────────────────
