@@ -573,7 +573,7 @@ def list_runs():
     out = []
     if not os.path.isdir(WS):
         return out
-    for name in sorted(os.listdir(WS), reverse=True)[:50]:
+    for name in sorted(os.listdir(WS), key=lambda n: os.path.getmtime(os.path.join(WS, n)), reverse=True)[:50]:
         p = os.path.join(WS, name, "result.json")
         if os.path.exists(p):
             try:
