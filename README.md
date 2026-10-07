@@ -150,4 +150,4 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 ## 라이선스
 
-[MIT License](LICENSE) © DongJu Kim (gggg8657). 감싸서 쓰는 kordoc 은 MIT(`LICENSE-kordoc`).
+[MIT License](LICENSE) — kordoc © chrisryugj(`LICENSE-kordoc`), 이 패키지에서 작성한 파일 © gggg8657.
