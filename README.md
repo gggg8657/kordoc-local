@@ -1,15 +1,53 @@
-# kordoc-local — HWP·PDF 문서를 로컬 LLM으로 요약·질문·공문서 초안(HWPX) 생성·윤문
+# kordoc-local — 문서 읽기와 HWPX 초안
 
-> **한 줄 요약** — 오픈소스 한국 공문서 파서 [kordoc](https://github.com/chrisryugj/kordoc)(MIT, PDF 공개 벤치 1위·HWPX 표 무손실)을
-> 폐쇄망 서버의 Ollama나 vLLM에 붙여 쓰는 문서 에이전트 패키지입니다. HWP·HWPX·PDF·DOCX·XLSX(스캔본은 내장 OCR)를 올리면
-> 로컬 LLM이 요약·질의응답을 하고, 보고서·기안문 초안은 kordoc이 표기법 검수 후 **한컴에서 바로 열리는 HWPX** 로 내려줍니다.
-> 기존 문서 **윤문**은 문장만 다듬어 **원본 HWPX/HWP 서식(표·박스·글자모양)을 그대로 둔 채** 다시 내려줍니다.
-> 파이썬은 표준 라이브러리만, 문서 엔진은 Node 20 위에서 돌며 한컴오피스·클라우드 API·API 키가 필요 없습니다.
-> 로컬 8B 모델로 PoC를 돌려 HWPX 생성·검증까지 확인했고, GPU 서버에서 큰 모델을 붙이면 초안 품질이 올라갑니다.
->
-> - **설치**: `bash setup.sh` 하나 (OS 판별 → Node·kordoc 설치 → LLM 서버 탐색/세팅 → 웹 페이지 기동). 폐쇄망은 `pack.sh` 번들 반입.
-> - **외부 통신**: 없음. OCR 모델은 번들에 동봉, `KORDOC_OFFLINE=1` 로 kordoc 아웃바운드 전량 차단.
-> - **모델**: 한국어 되는 아무거나. Ollama든 OpenAI 호환(vLLM·LM Studio·llama.cpp)이든 환경변수 하나로 전환, 코드 수정 없음.
+HWP·HWPX·PDF·DOCX·XLSX 문서를 로컬 LLM으로 요약하거나 질문에 답하고, 요청만으로 공문서 초안을 만들어 **한컴에서 바로 열리는 HWPX**로 내려받는 웹 UI / CLI입니다.
+
+![kordoc 실행 화면 — ① 초안 본문 ② 파일과 검증 ③ 윤문하기](docs/img/kordoc-usage.png)
+
+## 무엇을 하나
+
+- 오픈소스 한국 공문서 파서 [kordoc](https://github.com/chrisryugj/kordoc)(MIT)을 폐쇄망의 Ollama나 vLLM에 붙여 쓰는 문서 에이전트입니다. 스캔본은 내장 OCR로 읽습니다.
+- **요약 · 질문**: 문서 근거로 개조식 요약·답변(근거가 없으면 "문서에 없음").
+- **공문서 초안 → HWPX**: LLM이 초안을 쓰면 kordoc이 표기법 검사 → 프리셋 기반 HWPX 생성 → 구조 검증을 수행합니다.
+- **윤문**: 문장만 다듬고 **원본 HWPX/HWP 서식(표·박스·글자모양)은 그대로** 둔 채 다시 내려줍니다.
+- 파이썬은 표준 라이브러리만, 문서 엔진은 Node 20 위에서 돌며 한컴오피스·클라우드 API·API 키가 필요 없습니다. `KORDOC_OFFLINE=1`로 kordoc 아웃바운드를 전량 차단합니다.
+
+## 사용 방법
+
+포털 경유(`http://<포털>:8700/t/kordoc-local/`) 또는 단독 실행(`http://localhost:8766`) 화면에서:
+
+1. **파일 또는 작성 요청을 넣는다** — 요약·질문은 문서를 올리고, 초안은 파일 없이 요청만 적어도 됩니다.
+2. **작업과 양식을 선택한다** — 작업(요약 / 질문 / 공문서 초안 → HWPX)을 고르고, 초안은 보고서·계획서 등 프리셋이나 등록한 HWPX 양식을 고른 뒤 **실행**. 생성된 본문이 결과 칸에 나옵니다. (그림 ①)
+3. **검수 뒤 HWPX를 받는다** — 표기법 검수 통과·HWPX 구조 검증 상태를 보고 **⬇ HWPX 내려받기**(그림 ②). **표기법 검수**·**로그** 탭도 확인합니다. 필요하면 **✍ 윤문하기**로 방금 만든 문서를 선택한 강도로 다시 다듬습니다(그림 ③).
+
+긴 문서는 앞 12,000자(`MAX_CHARS`)만 모델에 들어갑니다.
+
+## 예시
+
+가상 자료 정리 사례를 `gemma4:31b` · 작업 "공문서 초안 → HWPX" · 프리셋 보고서로 실제 실행했습니다(파일 없이 요청만).
+
+요청:
+
+```text
+문서 자료 정리 시범운영 보고서 초안을 짧게 작성해줘. 목적: 자료 검색 편의 개선. 기간: 2026. 10. 5.~10. 9. 대상: 가상 문서 12건. 수행: 파일명 통일, 날짜 표기 점검. 다음 계획: 10월 12일 안내문 배포. 입력에 없는 예산이나 성과 수치는 넣지 마.
+```
+
+결과 `보고서.hwpx` (HWPX 구조 검증 통과) 본문 발췌:
+
+```text
+문서 자료 정리 시범운영 결과 보고
+기간: 2026. 10. 5. ~ 10. 9.
+대상: 가상 문서 12건
+향후 계획: 2026. 10. 12. 안내문 배포 예정
+```
+
+날짜 범위의 물결표 앞뒤 공백에 표기 경고 1건이 남았습니다. 구조 검증과 내용 검토는 각각 확인하세요.
+
+<details><summary>입력 화면</summary>
+
+![kordoc 입력 화면](docs/img/kordoc-input.png)
+
+</details>
 
 ## 실행 — 스크립트 하나
 
@@ -34,7 +72,7 @@ LLM_API=openai LLM_BASE_URL=http://gpu-server:8000/v1 LLM_MODEL=Qwen3-32B python
 python3 app.py --cli summary 문서.hwpx
 python3 app.py --cli qa 문서.pdf "3장 예산 총액은?"
 python3 app.py --cli draft 문서.hwpx "개선방안 보고서 초안" 보고서     # 문서 없이는 -
-python3 app.py --cli polish 문서.hwpx standard                           # 윤문: light | standard | strong → _workspace/<run>/03_result.hwpx
+python3 app.py --cli polish 문서.hwpx standard                           # 윤문: light | standard | strong → $WORKSPACE/<run>/03_result.hwpx
 ```
 
 | 환경변수 | 기본 | 설명 |
@@ -47,6 +85,9 @@ python3 app.py --cli polish 문서.hwpx standard                           # 윤
 | `MAX_CHARS` | `12000` | 문서 앞부분 컷 (모델 컨텍스트에 맞춰 조정) |
 | `PORT` | `8766` | |
 | `KORDOC_OFFLINE` | (없음) | `1` 이면 kordoc 아웃바운드 전량 차단 (폐쇄망 권장) |
+| `WORKSPACE` | `./_workspace` | 실행 결과 저장 위치 (포털이 `_data/kordoc-local` 로 지정) |
+
+[agent-page-portal](https://github.com/gggg8657/agent-page-portal)에서 띄우면 `PORT`·`WORKSPACE`를 포털이 정하고, LLM 설정은 포털 프로세스의 환경변수를 물려받습니다. 현재 운영 기본값은 로컬 Ollama의 `gemma4:31b`입니다. 단독 실행 시 코드 기본값은 `qwen3:8b`입니다.
 
 ## 파이프라인
 
@@ -75,7 +116,7 @@ LLM 이 칸 값(행정기관명·수신·경유·제목·본문·붙임·발신�
 윤문은 별도 작업이 아니라 **결과 화면의 "✍ 윤문하기" 버튼**으로 한다: 초안을 만들었으면 그 HWPX를, 요약·질문이면 올렸던 원본 문서를,
 윤문 결과면 그 윤문본을 다시 다듬는다(`POST /api/run {"task":"polish","from_run":"<run>","strength":…}`). 내려받는 이름은 `<원본>_윤문.hwpx`.
 강도: 가볍게(맞춤법·띄어쓰기·이중 피동·비문만) · 보통 · 적극(간결하게 다시 쓰기). 웹 UI "변경 내역" 탭에서 조각별 원문/윤문 비교(어절 단위 강조)와 원문 유지된 제안·사유를 본다.
-결과는 `_workspace/<run>/` 에 남는다(00 원본 · 01 파싱 md · 02 답변/02_polished.md · 03 HWPX·HWP). 지원 입력: hwp hwpx hml pdf docx xlsx xls png jpg webp md txt.
+결과는 `$WORKSPACE`(기본 `_workspace/`)`/<run>/` 에 남는다(00 원본 · 01 파싱 md · 02 답변/02_polished.md · 03 HWPX·HWP). 지원 입력: hwp hwpx hml pdf docx xlsx xls png jpg webp md txt.
 
 ## 폐쇄망 반입
 
@@ -106,3 +147,7 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 - 이 도구는 [agent-page-portal](https://github.com/gggg8657/agent-page-portal) 에 연결해 쓰도록 만들었습니다(단독 실행도 됨).
 
 저작권 표기·전체 목록은 `NOTICE` 를 보세요.
+
+## 라이선스
+
+[MIT License](LICENSE) © DongJu Kim (gggg8657). 감싸서 쓰는 kordoc 은 MIT(`LICENSE-kordoc`).
