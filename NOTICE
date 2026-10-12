@@ -1,17 +1,28 @@
 kordoc-local
 ============
 
+이 저장소의 원저작물(코드·UI·프롬프트·문서·도구 설계)은 DongJu Kim(김동주, gggg8657)이 작성했다.
+제3자 구성요소는 각자의 라이선스를 따르며 THIRD_PARTY_NOTICES.md 에 적었다.
+제3자 구성요소의 권리는 이 저장소의 라이선스로 바뀌지 않는다.
+단, kordoc(https://github.com/chrisryugj/kordoc)은 chrisryugj 의 저작물로, 이 저장소에는 npm 으로 설치해 수정 없이 실행할 뿐 그 소스를 담지 않는다(예외: sample/dummy.hwpx).
+연구·내부 시험용 프로토타입이며 배포·상업 서비스용이 아니다.
+화면 하단·메타데이터의 저작자 표기는 지우거나 바꾸지 마세요.
+
 This package wraps (does not modify) the following open-source software:
 
   kordoc — https://github.com/chrisryugj/kordoc
   Copyright (c) chrisryugj. Licensed under the MIT License (see LICENSE-kordoc).
-  Installed unmodified from npm (kordoc ^4.17). sample/dummy.hwpx is taken from its tests/fixtures.
-  Bundled OCR models (models/, via `kordoc models --export`) are PP-OCRv5 (PaddlePaddle, Apache-2.0);
-  see kordoc's NOTICE and THIRD_PARTY/ inside node_modules/kordoc.
+  Installed unmodified from npm (kordoc ^4.17); not stored in this repository.
+  sample/dummy.hwpx is taken from kordoc's tests/fixtures (Copyright (c) chrisryugj, MIT).
+  textpatch.mjs (ours) calls kordoc's exported functions; it does not copy kordoc code.
+  OCR models (PP-OCRv5, PaddlePaddle, Apache-2.0) are downloaded by kordoc at runtime and are
+  bundled only into the offline tarball made by pack.sh (models/); see kordoc's NOTICE and
+  THIRD_PARTY/ inside node_modules/kordoc, and THIRD_PARTY_NOTICES.md.
 
-Files authored for this package (MIT):
-  app.py, ui.html, goal-prompt.md, selftest.py, setup.sh, setup.ps1, pack.sh, README.md
-  Copyright (c) 2026 gggg8657 <dongjukim.dev@gmail.com>
+Files authored for this package (MIT) — Copyright (c) 2026 DongJu Kim (gggg8657) <dongjukim.dev@gmail.com>:
+  app.py, forms.py, textpatch.mjs, ui.html, goal-prompt.md, selftest.py, setup.sh, setup.ps1, pack.sh,
+  gian_defaults.example.json, sample/polish_test.*, README.md, THIRD_PARTY_NOTICES.md
 
 LLM (not bundled): called via an OpenAI-compatible API; default deployment is Ollama (https://github.com/ollama/ollama, MIT)
-  serving Google Gemma (gemma4:31b, https://ai.google.dev/gemma — see Gemma's terms of use).
+  serving Google Gemma 4 (gemma4:31b; model card google/gemma-4-31B-it: Apache-2.0, https://ai.google.dev/gemma/docs/gemma_4_license).
+  Code fallback when LLM_MODEL is unset: qwen3:8b (Qwen/Qwen3-8B, Apache-2.0).

@@ -2,6 +2,8 @@
 
 HWP·HWPX·PDF·DOCX·XLSX 문서를 로컬 LLM으로 요약하거나 질문에 답하고, 요청만으로 공문서 초안을 만들어 **한컴에서 바로 열리는 HWPX**로 내려받는 웹 UI / CLI입니다.
 
+> ⚠️ 연구·내부 시험용 프로토타입입니다(배포·상업 서비스용 아님). 제3자 구성요소의 라이선스는 THIRD_PARTY_NOTICES.md 를 확인하세요.
+
 ![kordoc 실행 화면 — ① 초안 본문 ② 파일과 검증 ③ 윤문하기](docs/img/kordoc-usage.png)
 
 ## 무엇을 하나
@@ -145,11 +147,17 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 - **[kordoc](https://github.com/chrisryugj/kordoc) (MIT, chrisryugj)** — npm 에서 수정 없이 설치해 감쌉니다 (`LICENSE-kordoc`). `sample/dummy.hwpx` 는 kordoc 의 tests/fixtures 에서 가져옴
 - OCR 모델 PP-OCRv5 ([PaddlePaddle/PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR), Apache-2.0) — kordoc 의 NOTICE·THIRD_PARTY 참고
-- **LLM 실행** — OpenAI 호환 API 로 호출합니다(모델 가중치는 동봉하지 않음). 기본 배포는 [Ollama](https://github.com/ollama/ollama) (MIT) 위의 Google [Gemma](https://ai.google.dev/gemma) `gemma4:31b` — 모델 이용 조건은 Gemma 배포처 참고.
+- **LLM 실행** — OpenAI 호환 API 로 호출합니다(모델 가중치는 동봉하지 않음). 기본 배포는 [Ollama](https://github.com/ollama/ollama) (MIT) 위의 Google [Gemma 4](https://huggingface.co/google/gemma-4-31B-it) `gemma4:31b` (모델 카드 기준 Apache-2.0). `LLM_MODEL` 을 주지 않으면 코드 기본값은 `qwen3:8b` ([Qwen3](https://huggingface.co/Qwen/Qwen3-8B), Apache-2.0). 다른 모델을 쓰면 그 모델의 라이선스를 확인하세요.
 - 이 도구는 [agent-page-portal](https://github.com/gggg8657/agent-page-portal) 에 연결해 쓰도록 만들었습니다(단독 실행도 됨).
+- kordoc 의 npm 의존성(PDF·OCR 엔진, 이미지 처리용 libvips 는 LGPL-3.0-or-later)과 실행 중 내려받는 OCR 모델은 THIRD_PARTY_NOTICES.md 에 적었습니다. **폐쇄망 번들(`pack.sh`)을 외부에 넘길 때**는 재배포가 되므로 [#1](https://github.com/gggg8657/kordoc-local/issues/1) 의 고지 조건을 먼저 확인하세요. PDF 수식 OCR(`--formula-ocr`, YOLOv8 기반 모델)은 이 도구에서 켜지 않습니다 — [#2](https://github.com/gggg8657/kordoc-local/issues/2).
+- kordoc 은 chrisryugj 의 저작물이고, 이 저장소의 `app.py`·`forms.py`·`textpatch.mjs`·`ui.html`·setup/pack 스크립트·문서는 DongJu Kim(gggg8657)이 작성했습니다.
 
-저작권 표기·전체 목록은 `NOTICE` 를 보세요.
+저작권 표기는 `NOTICE`, 제3자 구성요소 전체 목록·라이선스·상업 이용 확인 사항은 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 를 보세요.
 
 ## 라이선스
 
 [MIT License](LICENSE) — kordoc © chrisryugj(`LICENSE-kordoc`), 이 패키지에서 작성한 파일 © gggg8657.
+
+## 만든 사람
+
+DongJu Kim (gggg8657) — 설계·구현 (문서 파서 kordoc: chrisryugj)
