@@ -89,6 +89,8 @@ python3 app.py --cli polish 문서.hwpx standard                           # 윤
 
 [agent-page-portal](https://github.com/gggg8657/agent-page-portal)에서 띄우면 `PORT`·`WORKSPACE`를 포털이 정하고, LLM 설정은 포털 프로세스의 환경변수를 물려받습니다. 현재 운영 기본값은 로컬 Ollama의 `gemma4:31b`입니다. 단독 실행 시 코드 기본값은 `qwen3:8b`입니다.
 
+기록은 사용자별로 따로 저장됩니다(포털 접속자 기준, 포털이 넘기는 `X-Agent-User` 헤더 → `$WORKSPACE/u/<사용자>/`). 서버 주인(관리자)과 단독 실행은 예전처럼 `$WORKSPACE` 바로 아래를 쓰므로 지금까지의 기록도 그대로 보입니다. 포털이 `BIND=127.0.0.1` 을 넘기면 포털을 거쳐서만 접속됩니다. 등록한 양식(`forms/`)과 기안 기본값은 모두가 같이 쓰는 공유 설정입니다.
+
 ## 파이프라인
 
 | 작업 | 흐름 | LLM 콜 |

@@ -493,7 +493,8 @@ def gian_build(preset, answer, d, log, emit):
     return res
 
 
-def process(task, question="", file=None, model=MODEL, preset="보고서", emit=lambda ev: None, strength="standard"):
+def process(task, question="", file=None, model=MODEL, preset="보고서", emit=lambda ev: None, strength="standard", ws=None):
+    ws = ws or WS  # 사용자 폴더 (없으면 예전 WORKSPACE)
     if task not in TASKS:
         raise ValueError(f"task 는 {TASKS} 중 하나")
     if preset not in PRESETS and not str(preset).startswith("form:"):
@@ -501,7 +502,7 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     if file and not file.lower().endswith(EXTS):
         raise ValueError(f"지원하지 않는 확장자: {os.path.basename(file)} (지원: {', '.join(EXTS)})")
     run_id = f"{datetime.date.today()}-{secrets.token_hex(2)}"
-    d = os.path.join(WS, run_id)
+    d = os.path.join(ws, run_id)
     os.makedirs(d)
     log, source, truncated = [], "", False
     if task == "polish":
@@ -570,10 +571,11 @@ def result_name(j, path):
     return (f"{stem}_{tag}" if stem else tag) + ext
 
 
-def polish_source(run_id):
+def polish_source(run_id, ws=None):
     """이전 실행에서 윤문할 문서를 고른다 — 03_result(초안·윤문 결과) 우선, 없으면 00_원본. 알아볼 수 있는 이름으로 _upload 에 복사"""
+    ws = ws or WS  # 사용자 폴더 (없으면 예전 WORKSPACE)
     if not re.fullmatch(RUN_RE, run_id or ""): raise ValueError("잘못된 실행 ID")
-    d = os.path.join(WS, run_id); j = json.loads(read(os.path.join(d, "result.json")))
+    d = os.path.join(ws, run_id); j = json.loads(read(os.path.join(d, "result.json")))
     if j.get("hwpx") and os.path.exists(os.path.join(d, j["hwpx"])):
         src = os.path.join(d, j["hwpx"])
         name = (os.path.splitext(j["file"])[0] + os.path.splitext(src)[1]) if j["task"] == "polish" else result_name(j, src)  # 윤문본을 다시 윤문하면 이름 유지
@@ -581,18 +583,20 @@ def polish_source(run_id):
         cand = [f for f in os.listdir(d) if f.startswith("00_")]
         if not cand: raise ValueError("이 실행에는 윤문할 문서가 없습니다")
         src, name = os.path.join(d, cand[0]), cand[0][3:]
-    os.makedirs(os.path.join(WS, "_upload"), exist_ok=True)
-    dst = os.path.join(WS, "_upload", re.sub(r"[^\w.\-가-힣 ]", "_", name))
+    os.makedirs(os.path.join(ws, "_upload"), exist_ok=True)
+    dst = os.path.join(ws, "_upload", re.sub(r"[^\w.\-가-힣 ]", "_", name))
     shutil.copy(src, dst)
     return dst
 
 
-def list_runs():
+def list_runs(ws=None):
+    ws = ws or WS  # 사용자 폴더 (없으면 예전 WORKSPACE)
     out = []
-    if not os.path.isdir(WS):
+    if not os.path.isdir(ws):
         return out
-    for name in sorted(os.listdir(WS), key=lambda n: os.path.getmtime(os.path.join(WS, n)), reverse=True)[:50]:
-        p = os.path.join(WS, name, "result.json")
+    names = [n for n in os.listdir(ws) if n != "u"]  # u/ = 다른 사용자 폴더
+    for name in sorted(names, key=lambda n: os.path.getmtime(os.path.join(ws, n)), reverse=True)[:50]:
+        p = os.path.join(ws, name, "result.json")
         if os.path.exists(p):
             try:
                 j = json.load(open(p, encoding="utf-8"))
@@ -606,6 +610,16 @@ def list_runs():
 # ── HTTP ───────────────────────────────────────────────────────────────
 HTML = read(os.path.join(ROOT, "ui.html")) if os.path.exists(os.path.join(ROOT, "ui.html")) else "ui.html 없음"
 RUN_RE = r"\d{4}-\d{2}-\d{2}-[0-9a-f]{4}"
+
+
+def user_ws(h):
+    """포털이 넘긴 사용자별 작업 폴더. owner(서버 주인)·헤더 없음(단독 실행) = 예전 WORKSPACE 그대로"""
+    u = (h.headers.get("X-Agent-User") or "owner").strip()
+    if u == "owner":
+        return WS
+    d = os.path.join(WS, "u", re.sub(r"[^A-Za-z0-9_.-]", "_", u)[:64] or "_")
+    os.makedirs(d, exist_ok=True)
+    return d
 
 # ── 저작권 표기 (LICENSE·NOTICE 참고) ─────────────────────────────────────
 _SIG = __import__("base64").b64decode("wqkgMjAyNiBnZ2dnODY1NyDCtyBkb25nanVraW0uZGV2QGdtYWlsLmNvbQ==").decode()
@@ -648,16 +662,17 @@ class H(BaseHTTPRequestHandler):
             if self.path == "/api/forms":
                 return self._send(forms.listing())
             if self.path == "/api/runs":
-                return self._send(list_runs())
+                return self._send(list_runs(user_ws(self)))
+            ws = user_ws(self)
             m = re.fullmatch(rf"/api/runs/({RUN_RE})", self.path)
             if m:
-                return self._send(read(os.path.join(WS, m.group(1), "result.json")).encode())
+                return self._send(read(os.path.join(ws, m.group(1), "result.json")).encode())
             m = re.fullmatch(rf"/api/runs/({RUN_RE})/(03_result\.hwpx|03_result\.hwp|02_answer\.md|02_polished\.md|01_source\.md)", self.path)
             if m:
                 name = f"{m.group(1)}_{m.group(2)}"
                 if m.group(2).startswith("03_result"):  # 원본이름_윤문.hwpx / 원본이름_보고서.hwpx / 보고서.hwpx
-                    name = result_name(json.loads(read(os.path.join(WS, m.group(1), "result.json"))), m.group(2))
-                with open(os.path.join(WS, m.group(1), m.group(2)), "rb") as f:
+                    name = result_name(json.loads(read(os.path.join(ws, m.group(1), "result.json"))), m.group(2))
+                with open(os.path.join(ws, m.group(1), m.group(2)), "rb") as f:
                     return self._send(f.read(), "application/octet-stream", name=name)
             self._send(signed(HTML.replace("%MODEL%", json.dumps(MODEL))).encode(), "text/html; charset=utf-8")
         except FileNotFoundError:
@@ -687,16 +702,16 @@ class H(BaseHTTPRequestHandler):
                 return self._send({"error": str(e)}, code=400)
             return self._send({"error": "no route"}, code=404)
         task = req.get("task") or "summary"
-        file = None
+        file, ws = None, user_ws(self)
         if req.get("file_b64"):
             name = re.sub(r"[^\w.\-가-힣 ]", "_", os.path.basename(req.get("file_name") or "upload.bin"))
-            os.makedirs(os.path.join(WS, "_upload"), exist_ok=True)
-            file = os.path.join(WS, "_upload", name)
+            os.makedirs(os.path.join(ws, "_upload"), exist_ok=True)
+            file = os.path.join(ws, "_upload", name)
             with open(file, "wb") as f:
                 f.write(base64.b64decode(req["file_b64"]))
         if req.get("from_run"):  # 결과 화면의 "윤문하기": 그 실행의 HWPX 결과(없으면 올렸던 원본)를 이어서 윤문
             try:
-                file = polish_source(req["from_run"])
+                file = polish_source(req["from_run"], ws)
             except (ValueError, FileNotFoundError) as e:
                 return self._send({"error": str(e)}, code=400)
         if not file and not (req.get("question") or "").strip():
@@ -726,7 +741,7 @@ class H(BaseHTTPRequestHandler):
                 kinds = {"fill": "칸 채우기형", "body": "본문 작성형"}
                 emit({"stage": "form", "msg": f"양식 분석: {form_meta['name']} — {kinds[form_meta['kind']]}" + ("" if temp_form else " (양식 목록에 저장)")})
             emit({"done": process(task, (req.get("question") or "").strip(), file, req.get("model") or MODEL,
-                                  req.get("preset") or "보고서", emit, req.get("strength") or "standard")})
+                                  req.get("preset") or "보고서", emit, req.get("strength") or "standard", ws)})
         except Exception as e:
             emit({"error": f"{type(e).__name__}: {e}"})
         finally:
@@ -751,4 +766,4 @@ if __name__ == "__main__":
     if not os.path.exists(_CLI):
         sys.exit("node_modules/kordoc 없음 — 이 폴더에서 `npm install` 또는 pack.sh 번들을 쓰세요")
     print(f"kordoc local → http://localhost:{PORT}  (model={MODEL}, llm={LLM_API} {LLM_BASE}, kordoc={' '.join(KORDOC[:2])})  {_SIG}")
-    ThreadingHTTPServer(("", PORT), H).serve_forever()
+    ThreadingHTTPServer((os.environ.get("BIND", ""), PORT), H).serve_forever()
