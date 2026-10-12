@@ -19,8 +19,9 @@ node node_modules/kordoc/dist/cli.js check-ocr-models >/dev/null 2>&1 || true
 node node_modules/kordoc/dist/cli.js models --export "$STAGE/models"
 
 # 3) 앱 파일
-cp app.py forms.py textpatch.mjs gian_defaults.json gian_defaults.example.json ui.html goal-prompt.md selftest.py setup.sh setup.ps1 README.md NOTICE LICENSE LICENSE-kordoc "$STAGE/"
+cp app.py forms.py textpatch.mjs gian_defaults.example.json ui.html goal-prompt.md selftest.py setup.sh setup.ps1 README.md NOTICE LICENSE LICENSE-kordoc "$STAGE/"
 cp -r sample "$STAGE/"
+[ -f gian_defaults.json ] && cp gian_defaults.json "$STAGE/"
 
 # 4) (선택) Node 바이너리
 if [ "${WITH_NODE:-}" = "1" ]; then

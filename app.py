@@ -331,9 +331,13 @@ TEMPLATES = os.path.join(ROOT, "node_modules", "kordoc", "templates")
 
 def gian_defaults():
     """(값, 고정 키). 고정 키는 문서 내용과 상관없이 덮어쓰고, 나머지는 LLM 이 비운 칸만 채운다."""
-    try:
-        raw = json.loads(read(os.path.join(ROOT, "gian_defaults.json")))
-    except FileNotFoundError:
+    for name in ("gian_defaults.json", "gian_defaults.example.json"):  # 없으면 예시 값
+        try:
+            raw = json.loads(read(os.path.join(ROOT, name)))
+            break
+        except FileNotFoundError:
+            pass
+    else:
         return {}, set()
     return {k: v for k, v in raw.items() if not k.startswith("_")}, set(raw.get("_고정") or [])
 
