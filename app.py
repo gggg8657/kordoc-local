@@ -145,6 +145,26 @@ def models():
         return [m["name"] for m in json.load(r)["models"]]
 
 
+_BACKEND = None
+
+
+def backend_name():
+    """진행 표시용 LLM 서버 이름. openai 방식이면 /models 의 owned_by(vllm 등)로 짐작, 모르면 'OpenAI 호환'."""
+    global _BACKEND
+    if _BACKEND is None:
+        if LLM_API != "openai":
+            _BACKEND = "Ollama"
+        else:
+            try:
+                req = urllib.request.Request(LLM_BASE + "/models", headers={"Authorization": f"Bearer {LLM_KEY}"} if LLM_KEY else {})
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    own = (json.load(r).get("data") or [{}])[0].get("owned_by", "")
+                _BACKEND = {"vllm": "vLLM", "sglang": "SGLang", "llamacpp": "llama.cpp", "lmstudio": "LM Studio"}.get(str(own).lower(), "OpenAI 호환")
+            except Exception:
+                return "OpenAI 호환"  # 다음에 다시 물어봄
+    return _BACKEND
+
+
 # ── 프롬프트 ────────────────────────────────────────────────────────────
 def prompts():
     txt = read(os.path.join(ROOT, "goal-prompt.md"))
@@ -537,7 +557,7 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
         user = f"[양식] {form[0]['name']}\n{forms.prompt_spec(form[0])}\n\n[오늘] {t.year}. {t.month}. {t.day}.\n\n" + user
     write(os.path.join(d, "01_prompt.txt"), user)
 
-    emit({"stage": "llm", "msg": f"Ollama {model} ({task})", "reset": True})
+    emit({"stage": "llm", "msg": f"{backend_name()} {model} ({task})", "reset": True})
     answer = _clean(ollama(system, user, model, on_token=lambda t: emit({"token": t})))
     write(os.path.join(d, "02_answer.md"), answer)
 

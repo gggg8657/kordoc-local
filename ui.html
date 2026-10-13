@@ -30,7 +30,7 @@
   #formName{min-width:0!important;max-width:100%}table.cg td:last-child:not(:first-child){min-width:4.5em}input[type=file]{max-width:100%}
 </style>
 
-<h1>kordoc local <small>— HWP·HWPX·PDF·DOCX·XLSX → 로컬 Ollama 요약 · 질문 · 공문서 초안(HWPX) · 윤문(원본 서식 유지)</small></h1>
+<h1>kordoc local <small>— HWP·HWPX·PDF·DOCX·XLSX → 로컬 LLM 요약 · 질문 · 공문서 초안(HWPX) · 윤문(원본 서식 유지)</small></h1>
 <div id="stages"></div>
 <div class="bar">
   <input type="file" id="file" accept=".hwp,.hwpx,.hml,.pdf,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp,.md,.txt">
@@ -83,7 +83,7 @@ const $ = id => document.getElementById(id);
 const MODEL_DEFAULT = %MODEL%;
 fetch('api/models').then(r => r.json()).then(ms => {
   $('model').innerHTML = ms.map(m => `<option ${m === MODEL_DEFAULT ? 'selected' : ''}>${m}</option>`).join('');
-}).catch(() => $('status').textContent = 'Ollama에 연결할 수 없습니다 (localhost:11434)');
+}).catch(() => $('status').textContent = 'LLM 서버에 연결할 수 없습니다');
 $('task').onchange = () => { const d = $('task').value !== 'draft'; $('presetL').hidden = $('formInL').hidden = d; $('formSaveL').hidden = d || !$('formIn').files[0]; };
 $('formIn').onchange = () => {
   const f = $('formIn').files[0];
