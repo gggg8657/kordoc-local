@@ -157,18 +157,19 @@ async function loadForms() {
   const fs = await fetch('api/forms').then(r => r.json());
   $('formOpts').innerHTML = fs.map(f => `<option value="form:${f.id}">${esc(f.name)}</option>`).join('');
   $('formList').innerHTML = fs.length ? `<tr><th>이름</th><th>종류</th><th>인식한 것</th><th></th></tr>` + fs.map(f => `<tr><td>${esc(f.name)}</td>
-    <td><select data-id="${f.id}" class="fkind">${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === f.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
+    <td><select data-id="${f.id}" class="fkind" ${f.can_edit === false ? 'disabled title="만든 사람이나 관리자만 바꿀 수 있어요"' : ''}>${Object.entries(KIND).map(([k, v]) => `<option value="${k}" ${k === f.kind ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
     <td style="font-size:13px;color:var(--muted)">${f.kind === 'fill' ? `칸 ${f.fields.length}개${f.boxes.length ? ' · 큰 칸 ' + f.boxes.length : ''}` : `견본 ${Object.entries(f.roles).map(([k, v]) => ({ chapter: 'Ⅰ장', l1: '□', l2: '○', l3: '-', l4: '·', note: '※', caption: '표제목', table: '표', refbox: '참고상자' }[k])).join(' ')} · 앞부분 ${f.front.length}곳`}</td>
-    <td><button data-del="${f.id}">삭제</button></td></tr>`).join('') : '<tr><td>올린 양식이 없어요</td></tr>';
-  document.querySelectorAll('.fkind').forEach(s => s.onchange = () => fetch('api/forms/kind', { method: 'POST', body: JSON.stringify({ id: s.dataset.id, kind: s.value }) }).then(loadForms));
-  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('이 양식을 삭제할까요?')) { await fetch('api/forms/delete', { method: 'POST', body: JSON.stringify({ id: b.dataset.del }) }); loadForms(); } });
+    <td>${f.can_edit === false ? '' : `<button data-del="${f.id}">삭제</button>`}</td></tr>`).join('') : '<tr><td>올린 양식이 없어요</td></tr>';
+  const formOp = async (path, body) => { const r = await fetch(path, { method: 'POST', body: JSON.stringify(body) }); if (!r.ok) $('formMsg').innerHTML = `<span class="badge bad">${esc((await r.json().catch(() => ({}))).error || r.status)}</span>`; loadForms(); };
+  document.querySelectorAll('.fkind').forEach(s => s.onchange = () => formOp('api/forms/kind', { id: s.dataset.id, kind: s.value }));
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => { if (confirm('이 양식을 삭제할까요?')) formOp('api/forms/delete', { id: b.dataset.del }); });
 }
 loadForms();
 $('formUp').onclick = async () => {
   const f = $('formFile').files[0]; if (!f) { $('formMsg').textContent = '파일을 고르세요'; return; }
   if (!/\.hwpx$/i.test(f.name)) { $('formMsg').innerHTML = '<span class="badge warn">HWPX만 받아요</span> 한글에서 <b>파일 → 다른 이름으로 저장 → 파일 형식: HWPX 문서</b>로 저장해 올려 주세요.'; return; }
   $('formMsg').textContent = '분석 중…';
-  const r = await fetch('api/forms', { method: 'POST', body: JSON.stringify({ name: $('formName').value.trim(), file_name: f.name, file_b64: await b64(f) }) }).then(r => r.json());
+  const r = await fetch('api/forms', { method: 'POST', body: JSON.stringify({ name: $('formName').value.trim(), file_name: f.name, file_b64: await b64(f) }) }).then(r => r.json().catch(() => ({ error: '요청 실패 (' + r.status + ')' })));
   $('formMsg').innerHTML = r.error ? `<span class="badge bad">${esc(r.error)}</span>` : `<span class="badge ok">등록: ${esc(r.name)} — ${KIND[r.kind]}</span>`;
   $('formFile').value = ''; $('formName').value = ''; loadForms();
 };

@@ -67,7 +67,10 @@ src = app.polish_source(draft_run)
 assert os.path.basename(src) == "dummy_보고서.hwpx", src
 r2 = app.process("polish", "", src, "fake")
 assert r2["mode"] == "patch" and r2["valid"] and app.result_name(r2, r2["hwpx"]) == "dummy_보고서_윤문.hwpx", (r2["log"], r2["file"])
-assert os.path.basename(app.polish_source(r["run_id"])) == "polish_test.hwpx"  # 윤문본을 다시 → 이름 유지
+_src2 = app.polish_source(r["run_id"])
+assert os.path.basename(_src2) == "polish_test.hwpx"  # 윤문본을 다시 → 이름 유지
+for _p in (src, _src2):  # 서버는 실행 뒤 _upload 복사본을 지운다 — 시험도 남기지 않음
+    os.path.exists(_p) and os.remove(_p)
 try:
     app.polish_source("../etc"); assert False
 except ValueError:
@@ -112,6 +115,24 @@ app.ollama = lambda system, user, model, on_token=None: json.dumps(FILL, ensure_
 r = app.process("draft", "기안 써줘", None, "fake", "form:" + g["id"])
 assert r["valid"] and "시험 제목" in r["output"], r["output"][:300]
 assert app.forms.remove(g["id"])["ok"] and len(app.forms.listing()) == 1
+# 양식 권한: 만든 계정·owner 만 지우기·종류 바꾸기, 응답에 계정 없음
+h = app.forms.register("권한 시험", open(os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "rb").read(), app.kordoc, "alice")
+assert "_by" not in h and h["can_edit"] and not next(x for x in app.forms.listing("bob") if x["id"] == h["id"])["can_edit"]
+for fn in (lambda: app.forms.remove(h["id"], "bob"), lambda: app.forms.set_kind(h["id"], "fill", "bob"), lambda: app.forms.remove(m["id"], "alice")):
+    try:
+        fn(); raise AssertionError("남의 양식을 바꾸면 안 됨")
+    except PermissionError:
+        pass
+assert app.forms.remove(h["id"], "alice")["ok"]
+_bad = app.forms.analyze
+app.forms.analyze = lambda *a: (_ for _ in ()).throw(RuntimeError("분석 실패"))
+_n = len(os.listdir(app.forms.DIR))
+try:
+    app.forms.register("실패", open(os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "rb").read(), app.kordoc, "alice"); raise AssertionError
+except RuntimeError:
+    pass
+app.forms.analyze = _bad
+assert len(os.listdir(app.forms.DIR)) == _n, "분석 실패한 양식 파일이 남음"
 _sh.rmtree(app.forms.DIR)
 
 # 9) 글 윤문 API(다른 도구의 "윤문하기"): 파일 없이 글만, 숫자를 바꾼 제안은 원문 유지

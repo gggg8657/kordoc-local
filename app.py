@@ -612,6 +612,31 @@ HTML = read(os.path.join(ROOT, "ui.html")) if os.path.exists(os.path.join(ROOT, 
 RUN_RE = r"\d{4}-\d{2}-\d{2}-[0-9a-f]{4}"
 
 
+MAX_UPLOAD = int(os.environ.get("MAX_UPLOAD_MB", "50")) * 2**20  # 올리는 파일 하나(문서·양식) 상한
+MAX_BODY = 3 * MAX_UPLOAD  # 요청 본문 상한(문서 + 양식을 base64 로)
+
+
+def agent_user(h):
+    return (h.headers.get("X-Agent-User") or "owner").strip() or "owner"
+
+
+def b64file(s, what="파일"):
+    """base64 → bytes, 크기 상한 넘으면 OverflowError(413)"""
+    if not isinstance(s, str):
+        raise ValueError(f"{what} 형식이 잘못됨")
+    if len(s) * 3 // 4 > MAX_UPLOAD:
+        raise OverflowError(f"{what} 크기가 너무 큽니다(최대 {MAX_UPLOAD // 2**20}MB)")
+    try:
+        return base64.b64decode(s, validate=False)
+    except (ValueError, TypeError):
+        raise ValueError(f"{what} base64 가 잘못됨")
+
+
+def scrub(msg):
+    """오류 문장에서 서버 절대 경로를 감춘다"""
+    return str(msg).replace(WS, "<workspace>").replace(ROOT, ".")
+
+
 def user_ws(h):
     """포털이 넘긴 사용자별 작업 폴더. owner(서버 주인)·헤더 없음(단독 실행) = 예전 WORKSPACE 그대로"""
     u = (h.headers.get("X-Agent-User") or "owner").strip()
@@ -660,7 +685,7 @@ class H(BaseHTTPRequestHandler):
             if self.path == "/api/models":
                 return self._send(models())
             if self.path == "/api/forms":
-                return self._send(forms.listing())
+                return self._send(forms.listing(agent_user(self)))
             if self.path == "/api/runs":
                 return self._send(list_runs(user_ws(self)))
             ws = user_ws(self)
@@ -678,55 +703,80 @@ class H(BaseHTTPRequestHandler):
         except FileNotFoundError:
             self._send({"error": "없음"}, code=404)
         except Exception as e:
-            self._send({"error": f"{type(e).__name__}: {e}"}, code=500)
+            self._send({"error": scrub(f"{type(e).__name__}: {e}")}, code=500)
 
     def do_POST(self):
-        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return self._send({"error": "잘못된 요청"}, code=400)
+        if n > MAX_BODY:
+            self.close_connection = True
+            while n > 0 and self.rfile.read(min(n, 1 << 20)):  # 본문을 버려 읽어야 포털(프록시)이 413 을 받는다
+                n -= 1 << 20
+            return self._send({"error": f"요청이 너무 큽니다(파일 하나 최대 {MAX_UPLOAD // 2**20}MB)"}, code=413)
+        try:
+            req = json.loads(self.rfile.read(n) or b"{}")
+            if not isinstance(req, dict):
+                raise ValueError
+        except ValueError:
+            return self._send({"error": "잘못된 요청(JSON)"}, code=400)
+        by = agent_user(self)
         if self.path == "/api/polish_text":  # 다른 도구의 "윤문하기" (writer·notebook·meeting) — JSON 한 번에
             try:
                 return self._send(polish_text(req.get("text") or "", req.get("model") or MODEL, req.get("strength") or "standard"))
             except ValueError as e:
-                return self._send({"error": str(e)}, code=400)
+                return self._send({"error": scrub(e)}, code=400)
             except Exception as e:
-                return self._send({"error": f"{type(e).__name__}: {e}"}, code=500)
+                return self._send({"error": scrub(f"{type(e).__name__}: {e}")}, code=500)
         if self.path.startswith("/api/forms"):  # 양식 등록·삭제·종류 변경
             try:
                 if self.path == "/api/forms":
                     name = req.get("file_name") or ""
                     if not name.lower().endswith(".hwpx"):
                         raise ValueError(f"양식은 HWPX 파일만 받습니다({os.path.splitext(name)[1] or '확장자 없음'}). " + forms.HOWTO)
-                    return self._send(forms.register((req.get("name") or os.path.splitext(name)[0]).strip()[:60], base64.b64decode(req["file_b64"]), kordoc))
-                if self.path == "/api/forms/delete": return self._send(forms.remove(req.get("id")))
-                if self.path == "/api/forms/kind": return self._send(forms.set_kind(req.get("id"), req.get("kind")))
+                    return self._send(forms.register((req.get("name") or os.path.splitext(name)[0]).strip()[:60], b64file(req["file_b64"], "양식 파일"), kordoc, by))
+                if self.path == "/api/forms/delete": return self._send(forms.remove(req.get("id"), by))
+                if self.path == "/api/forms/kind": return self._send(forms.set_kind(req.get("id"), req.get("kind"), by))
+            except PermissionError as e:
+                return self._send({"error": str(e)}, code=403)
+            except OverflowError as e:
+                return self._send({"error": str(e)}, code=413)
             except (ValueError, FileNotFoundError, KeyError) as e:
-                return self._send({"error": str(e)}, code=400)
+                return self._send({"error": scrub(e) if not isinstance(e, KeyError) else f"{e} 없음"}, code=400)
+            except Exception as e:
+                return self._send({"error": scrub(f"{type(e).__name__}: {e}")}, code=500)
             return self._send({"error": "no route"}, code=404)
         task = req.get("task") or "summary"
         file, ws = None, user_ws(self)
-        if req.get("file_b64"):
-            name = re.sub(r"[^\w.\-가-힣 ]", "_", os.path.basename(req.get("file_name") or "upload.bin"))
-            os.makedirs(os.path.join(ws, "_upload"), exist_ok=True)
-            file = os.path.join(ws, "_upload", name)
-            with open(file, "wb") as f:
-                f.write(base64.b64decode(req["file_b64"]))
-        if req.get("from_run"):  # 결과 화면의 "윤문하기": 그 실행의 HWPX 결과(없으면 올렸던 원본)를 이어서 윤문
-            try:
-                file = polish_source(req["from_run"], ws)
-            except (ValueError, FileNotFoundError) as e:
-                return self._send({"error": str(e)}, code=400)
-        if not file and not (req.get("question") or "").strip():
+        if req.get("file_b64") and req.get("from_run"):
+            return self._send({"error": "file_b64 와 from_run 은 함께 보낼 수 없습니다"}, code=400)
+        if not req.get("file_b64") and not req.get("from_run") and not (req.get("question") or "").strip():
             return self._send({"error": "문서나 요청 중 하나는 있어야 합니다"}, code=400)
+        fname = req.get("form_name") or ""
+        if task == "draft" and req.get("form_b64") and not fname.lower().endswith(".hwpx"):
+            return self._send({"error": f"양식은 HWPX 파일만 받습니다({os.path.splitext(fname)[1] or '확장자 없음'}). " + forms.HOWTO}, code=400)
         temp_form, form_meta = None, None
-        if task == "draft" and req.get("form_b64"):  # 초안 화면에서 바로 넣은 양식 — 없으면 프리셋 목록에서 고른 것
-            fname = req.get("form_name") or ""
-            if not fname.lower().endswith(".hwpx"):
-                return self._send({"error": f"양식은 HWPX 파일만 받습니다({os.path.splitext(fname)[1] or '확장자 없음'}). " + forms.HOWTO}, code=400)
-            try:
-                form_meta = forms.register(os.path.splitext(os.path.basename(fname))[0][:60], base64.b64decode(req["form_b64"]), kordoc)
-            except ValueError as e:
-                return self._send({"error": str(e)}, code=400)
-            req["preset"] = "form:" + form_meta["id"]
-            if not req.get("form_save"): temp_form = form_meta["id"]
+        try:  # 여기서 실패하면 _upload 에 만든 파일을 지운다(스트림으로 넘어가면 그쪽 finally 가 지움)
+            if req.get("file_b64"):
+                data = b64file(req["file_b64"], "문서")
+                name = re.sub(r"[^\w.\-가-힣 ]", "_", os.path.basename(req.get("file_name") or "upload.bin"))
+                os.makedirs(os.path.join(ws, "_upload"), exist_ok=True)
+                file = os.path.join(ws, "_upload", name)
+                with open(file, "wb") as f:
+                    f.write(data)
+            if req.get("from_run"):  # 결과 화면의 "윤문하기": 그 실행의 HWPX 결과(없으면 올렸던 원본)를 이어서 윤문
+                file = polish_source(req["from_run"], ws)
+            if task == "draft" and req.get("form_b64"):  # 초안 화면에서 바로 넣은 양식 — 없으면 프리셋 목록에서 고른 것
+                form_meta = forms.register(os.path.splitext(os.path.basename(fname))[0][:60], b64file(req["form_b64"], "양식 파일"), kordoc, by)
+                req["preset"] = "form:" + form_meta["id"]
+                if not req.get("form_save"): temp_form = form_meta["id"]
+        except Exception as e:
+            if file and os.path.exists(file):
+                os.remove(file)
+            code = 413 if isinstance(e, OverflowError) else 400 if isinstance(e, (ValueError, FileNotFoundError)) else 500
+            msg = "이어서 할 실행 기록을 찾지 못했습니다" if isinstance(e, FileNotFoundError) else scrub(e) if code != 500 else scrub(f"{type(e).__name__}: {e}")
+            return self._send({"error": msg}, code=code)
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -743,12 +793,15 @@ class H(BaseHTTPRequestHandler):
             emit({"done": process(task, (req.get("question") or "").strip(), file, req.get("model") or MODEL,
                                   req.get("preset") or "보고서", emit, req.get("strength") or "standard", ws)})
         except Exception as e:
-            emit({"error": f"{type(e).__name__}: {e}"})
+            try:
+                emit({"error": scrub(f"{type(e).__name__}: {e}")})
+            except OSError:
+                pass
         finally:
-            if file:
+            if file and os.path.exists(file):
                 os.remove(file)
             if temp_form:
-                forms.remove(temp_form)
+                forms.remove(temp_form)  # 저장하지 않는 일회용 양식(owner 권한으로 지움)
 
 
 if __name__ == "__main__":
