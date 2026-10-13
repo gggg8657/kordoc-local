@@ -19,10 +19,23 @@ This package wraps (does not modify) the following open-source software:
   bundled only into the offline tarball made by pack.sh (models/); see kordoc's NOTICE and
   THIRD_PARTY/ inside node_modules/kordoc, and THIRD_PARTY_NOTICES.md.
 
-Files authored for this package (MIT) — Copyright (c) 2026 DongJu Kim (gggg8657) <dongjukim.dev@gmail.com>:
+Files authored for this package (PolyForm Noncommercial 1.0.0) — Copyright (c) 2026 DongJu Kim (gggg8657) <dongjukim.dev@gmail.com>:
   app.py, forms.py, textpatch.mjs, ui.html, goal-prompt.md, selftest.py, setup.sh, setup.ps1, pack.sh,
   gian_defaults.example.json, sample/polish_test.*, README.md, THIRD_PARTY_NOTICES.md
 
 LLM (not bundled): called via an OpenAI-compatible API; default deployment is Ollama (https://github.com/ollama/ollama, MIT)
   serving Google Gemma 4 (gemma4:31b; model card google/gemma-4-31B-it: Apache-2.0, https://ai.google.dev/gemma/docs/gemma_4_license).
   Code fallback when LLM_MODEL is unset: qwen3:8b (Qwen/Qwen3-8B, Apache-2.0).
+
+License / 라이선스 (2026-10-13 변경: MIT → PolyForm Noncommercial 1.0.0)
+  이 저장소의 원저작물은 PolyForm Noncommercial License 1.0.0 을 따른다 (LICENSE, SPDX: PolyForm-Noncommercial-1.0.0,
+  https://polyformproject.org/licenses/noncommercial/1.0.0/).
+  비상업 목적(개인 연구·학습·시험, 교육기관·공공 연구기관·정부기관·비영리 단체 등)의 사용·수정·재배포는 허용하며,
+  상업적 이용은 저작자의 별도 허락이 필요하다.
+  이전 버전: 커밋 5ebe229 까지(2026-10-13 이전)의 버전을 MIT 로 받아 간 사본에는 MIT 가 계속 적용된다. 변경은 이후 버전에만 적용된다.
+  제3자 구성요소(동봉 파일·설치 의존성·모델·데이터)는 각자의 원래 라이선스를 그대로 따르며 이 변경의 영향을 받지 않는다
+  (THIRD_PARTY_NOTICES.md).
+  단, kordoc(설치만 함)과 sample/dummy.hwpx 는 chrisryugj 의 저작물로 원래의 MIT License(LICENSE-kordoc)를 그대로 따른다.
+  연구·내부 시험용 프로토타입이며 배포·상업 서비스용이 아니다.
+
+Required Notice: Copyright 2026 DongJu Kim (gggg8657)

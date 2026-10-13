@@ -50,4 +50,4 @@ kordoc 자체가 포함한 파생 코드와 서식 자산(kordoc `NOTICE`·`THIR
 
 ## 이 저장소의 원저작물
 
-위 표에 없는 파일(코드·UI·프롬프트·패턴·문서·설정 예시·selftest)은 DongJu Kim(gggg8657)이 작성했고 이 저장소의 `LICENSE`(MIT)를 따릅니다.
+위 표에 없는 파일(코드·UI·프롬프트·패턴·문서·설정 예시·selftest)은 DongJu Kim(gggg8657)이 작성했고 이 저장소의 `LICENSE`(PolyForm Noncommercial 1.0.0)를 따릅니다.

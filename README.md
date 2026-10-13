@@ -175,7 +175,13 @@ WITH_NODE=1 ./pack.sh          # 서버에 Node 20+ 가 없으면 바이너리�
 
 ## 라이선스
 
-[MIT License](LICENSE) — kordoc © chrisryugj(`LICENSE-kordoc`), 이 패키지에서 작성한 파일 © gggg8657.
+- 이 패키지에서 작성한 파일: [PolyForm Noncommercial License 1.0.0](LICENSE) — Copyright 2026 DongJu Kim (gggg8657).
+- kordoc(npm 으로 설치, 이 저장소에 없음)과 `sample/dummy.hwpx`: © chrisryugj, 원래의 MIT License(`LICENSE-kordoc`)를 그대로 따릅니다.
+
+- 비상업 목적(개인 연구·학습·시험, 교육기관·공공 연구기관·정부기관·비영리 단체 등)이면 쓰고 고치고 다시 배포할 수 있습니다. 다시 배포할 때는 `LICENSE` 와 `Required Notice:` 줄을 함께 주세요.
+- 상업적 이용은 저작자의 별도 허락이 필요합니다.
+- 2026-10-13 이전 버전(커밋 `5ebe229` 까지)을 MIT 로 받아 간 사본에는 MIT 가 계속 적용됩니다. 이 변경은 이후 버전에만 적용됩니다.
+- 제3자 구성요소는 각자의 원래 라이선스를 따르며 이 라이선스로 바뀌지 않습니다(`THIRD_PARTY_NOTICES.md`, `NOTICE`).
 
 ## 만든 사람
 
