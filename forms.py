@@ -12,6 +12,7 @@ import os
 import re
 import secrets
 import zipfile
+import form_slots
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 DIR = os.path.join(os.environ.get("WORKSPACE") or ROOT, "forms")  # 포털에서는 AGENT_DATA/<도구>/forms
@@ -141,10 +142,15 @@ def analyze(path, kordoc):
     fields = [{"label": c["name"], "value": c.get("placeholder") or c.get("value") or ""} for c in dry.get("clickHereFields") or []]
     seen = {x["label"] for x in fields}
     fields += [x for x in dry.get("fields") or [] if x["label"] not in seen]
-    marked = sum(v for k, v in counts.items() if k in ("chapter", "l1", "l2", "l3", "l4"))
     boxes = [t for t in big_boxes(sec)]
-    kind = "body" if marked >= 3 else "fill"
-    return {"kind": kind, "roles": counts, "front": front, "fields": [{"label": f["label"], "hint": f.get("value", "")} for f in fields],
+    kind = "fill"  # 원본 문단 교체는 관리 화면에서 본문 작성형을 명시적으로 선택한 경우만
+    exact = []
+    for section in sorted(files):
+        if re.fullmatch(r"Contents/section\d+\.xml", section):
+            exact += form_slots.scan(files[section].decode("utf-8"), section, [f["label"] for f in fields])
+    fields = [{"label": x["label"], "value": x.get("hint", ""), "location": x.get("location", ""), "unit": x.get("suffix", "")} for x in exact]
+    fields = list({f["label"]: f for f in fields}.values())
+    return {"kind": kind, "roles": counts, "front": front, "fields": [{"label": f["label"], "hint": f.get("value", ""), "location": f.get("location", ""), "unit": f.get("unit", "")} for f in fields],
             "boxes": boxes, "blocks": len(bl)}
 
 
@@ -196,14 +202,24 @@ def listing(by="owner"):
     out = []
     for n in sorted(os.listdir(DIR)):
         if n.endswith(".json"):
-            with open(os.path.join(DIR, n), encoding="utf-8") as f: out.append(public(json.load(f), by))
+            out.append(public(get(n[:-5])[0], by))
     return out
 
 
 def get(fid):
     if not re.fullmatch(r"[0-9a-f]{8}", fid or ""): raise ValueError("잘못된 양식 ID")
     with open(os.path.join(DIR, fid + ".json"), encoding="utf-8") as f: meta = json.load(f)
-    return meta, os.path.join(DIR, fid + ".hwpx")
+    path = os.path.join(DIR, fid + ".hwpx")
+    if not meta.get("kind_selected"): meta["kind"] = "fill"
+    if meta["kind"] == "fill":
+        _, files = load(path)
+        exact = []
+        for section in sorted(files):
+            if re.fullmatch(r"Contents/section\d+\.xml", section):
+                exact += form_slots.scan(files[section].decode("utf-8"), section, [f["label"] for f in meta.get("fields", [])])
+        meta["fields"] = list({x["label"]: {"label": x["label"], "hint": x.get("hint", ""), "location": x.get("location", ""), "unit": x.get("suffix", "")} for x in exact}.values())
+        meta["boxes"] = []  # Included as exact named slots above.
+    return meta, path
 
 
 def remove(fid, by="owner"):
@@ -221,6 +237,7 @@ def set_kind(fid, kind, by="owner"):
     if not can_edit(meta, by):
         raise PermissionError("이 양식은 만든 사람이나 관리자만 바꿀 수 있습니다")
     meta["kind"] = kind
+    meta["kind_selected"] = True
     with open(os.path.join(DIR, fid + ".json"), "w", encoding="utf-8") as f: json.dump(meta, f, ensure_ascii=False, indent=1)
     return public(meta, by)
 
@@ -229,7 +246,11 @@ def set_kind(fid, kind, by="owner"):
 def prompt_spec(meta):
     """양식 설명 — LLM 사용자 메시지에 붙인다"""
     if meta["kind"] == "fill":
-        lines = [f'- "{f["label"]}"' + (f' (지금 적힌 안내: {f["hint"]})' if f["hint"] else "") for f in meta["fields"]]
+        lines = []
+        for field in meta["fields"]:
+            spec = {"key": field["label"], "position": field.get("location", ""),
+                    "template_text": field.get("hint", ""), "unit": field.get("unit", "")}
+            lines.append(json.dumps(spec, ensure_ascii=False))
         lines += [f'- "({b})" — 큰 칸, 여러 줄 글' for b in meta["boxes"]]
         return "[양식 칸]\n" + "\n".join(lines)
     front = "\n".join(f'- {f["i"]}: {f["text"]}' for f in meta["front"])
@@ -247,19 +268,16 @@ def parse_json(answer):
 
 # ── 칸 채우기형 ───────────────────────────────────────────────────────────
 def fill(meta, path, values, out, kordoc, workdir):
-    vals = {k: str(v).strip() for k, v in values.items() if str(v or "").strip()}
-    boxes = {b: vals.pop(f"({b})", vals.pop(b, None)) for b in meta.get("boxes", [])}
-    vj = os.path.join(workdir, "02_fields.json")
-    with open(vj, "w", encoding="utf-8") as f: json.dump(vals, f, ensure_ascii=False, indent=1)
-    code, msg = kordoc("fill", path, "-j", vj, "-o", out) if vals else (0, "채울 칸 없음")
-    if not vals: import shutil; shutil.copy(path, out)
-    if code != 0: raise RuntimeError(f"kordoc fill 실패: {msg[-300:]}")
-    if any(boxes.values()):
-        infos, files = load(out); sec = files[SEC].decode("utf-8")
-        for b, txt in boxes.items():
-            if txt: sec = box_append(sec, b, txt)
-        files[SEC] = sec.encode("utf-8"); save(out, infos, files)
-    return {"filled": len(vals) + sum(1 for v in boxes.values() if v), "log": msg}
+    if not isinstance(values, dict): raise ValueError("양식 응답은 JSON 객체여야 합니다")
+    # Rebuild positions from the original every time, including forms registered before this fix.
+    infos, files = load(path)
+    known = [f["label"] for f in meta.get("fields", [])]
+    report = form_slots.fill_files(files, values, known)
+    save(out, infos, files)
+    with open(os.path.join(workdir, "02_fields.json"), "w", encoding="utf-8") as f:
+        json.dump(values, f, ensure_ascii=False, indent=1)
+    return {"filled": len(report["filled"]), "report": report,
+            "log": json.dumps(report, ensure_ascii=False)}
 
 
 def box_append(sec, title, txt):
@@ -492,3 +510,39 @@ def build_body(path, out, front_map, lines):
     files["Contents/header.xml"] = hdr.xml.encode("utf-8")
     save(out, infos, files)
     return {"front": len(front_map), "lines": len([l for l in lines if str(l).strip()])}
+
+
+def explicit_sections(request, fields):
+    """Reuse explicitly sectioned user text; do not ask the model to rewrite it.
+
+    Only unique prose fields match. Numeric and hierarchical result columns remain
+    subject to their exact field contract. No document-specific coordinates.
+    """
+    aliases = {"연구내용": "연수내용", "연구활동": "연수내용", "연구만족도": "연수만족도"}
+    def heading_key(value):
+        value = re.sub(r"^\s*\d+[.)．]\s*", "", value).strip().strip('*')
+        value = re.sub(r"\([^)]*\)", "", value)
+        key = re.sub(r"\s+", "", value)
+        return aliases.get(key, key)
+    targets = {}
+    for field in fields:
+        if ' / ' in field['label'] or field.get('unit'): continue
+        key = heading_key(field['label'])
+        targets.setdefault(key, []).append(field['label'])
+    heading = re.compile(r"^\s*(?:#{1,6}\s+|(?=\d+[.)．]\s))(.+?)\s*$", re.M)
+    headings = list(heading.finditer(request))
+    matched = {}
+    repeated = set()
+    for i, m in enumerate(headings):
+        labels = targets.get(heading_key(m[1]), [])
+        if len(labels) != 1: continue
+        end = headings[i+1].start() if i+1 < len(headings) else len(request)
+        body = request[m.end():end].strip()
+        # Instructions outside the final section are never inserted as content.
+        body = re.split(r"\n\s*기재 시 확인 사항\s*[:：]", body, maxsplit=1)[0].strip()
+        body = re.sub(r"(?m)^\\([*-])", r"\1", body)
+        if not body: continue
+        label = labels[0]
+        if label in matched: repeated.add(label)
+        matched[label] = body
+    return {k: v for k, v in matched.items() if k not in repeated}

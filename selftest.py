@@ -98,7 +98,8 @@ assert app.result_name(r, r["hwpx"]) == "기안문.hwpx"
 import tempfile, shutil as _sh
 app.forms.DIR = tempfile.mkdtemp()
 m = app.forms.register("계획서 견본", open(os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "rb").read(), app.kordoc)
-assert m["kind"] == "body" and m["roles"].get("chapter") and m["roles"].get("l1") and m["roles"].get("table"), m
+assert m["kind"] == "fill" and m["roles"].get("chapter") and m["roles"].get("l1") and m["roles"].get("table"), m
+app.forms.set_kind(m["id"], "body")  # Explicit consent to replace body template paragraphs.
 BODY = {"front": {str(m["front"][0]["i"]): "시험 계획"}, "body": ["Ⅰ. 첫 장", "□ 항목 하나", "ㅇ 세부 하나", "<표 1. 일정>", "| 구분 | 기간 | 내용 |", "|---|---|---|", "| 1단계 | 10월 | 설계 |", "| 2단계 | 11월 | 개발 |", "Ⅱ. 둘째 장", "□ 항목 둘"]}
 def fake_form(system, user, model, on_token=None):
     calls.append((system, user)); return json.dumps(BODY, ensure_ascii=False)

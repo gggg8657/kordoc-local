@@ -459,13 +459,18 @@ def gian_indent(hwpx, field):
     return True
 
 
-def form_build(form, answer, d, log, emit):
+def form_build(form, answer, d, log, emit, request=""):
     """연구원 양식 채우기 — kind=fill 은 칸 값, kind=body 는 앞부분 + 본문 줄"""
     meta, path = form
     try:
         v = forms.parse_json(answer)
     except (ValueError, json.JSONDecodeError) as e:
         raise RuntimeError(f"LLM 이 양식 값을 JSON 으로 쓰지 못했습니다: {e}")
+    if meta["kind"] == "fill":
+        if not isinstance(v, dict): raise RuntimeError("양식 응답은 JSON 객체여야 합니다")
+        preserved = forms.explicit_sections(request, meta["fields"])
+        v.update(preserved)
+        if preserved: log.append("[explicit sections] 원문 유지: " + ", ".join(preserved))
     write(os.path.join(d, "02_fields.json"), json.dumps(v, ensure_ascii=False, indent=1))
     hwpx = os.path.join(d, "03_result.hwpx")
     if meta["kind"] == "fill":
@@ -484,7 +489,7 @@ def form_build(form, answer, d, log, emit):
     lint_r = lint(os.path.join(d, "02_body.md"))
     vcode, vout = kordoc("validate", hwpx); log.append(f"[kordoc validate] exit {vcode} {vout}")
     return {"lint": lint_r, "fields": v, "hwpx": "03_result.hwpx", "valid": vcode == 0, "preset": meta["name"], "form": meta["id"],
-            "output": parse_to(hwpx).strip()}
+            "output": parse_to(hwpx).strip(), **({"fill_report": info["report"]} if meta["kind"] == "fill" else {})}
 
 
 def gian_build(preset, answer, d, log, emit):
@@ -566,7 +571,7 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
               "source": source, "truncated": truncated, "output": answer, "hwpx": None, "lint": None, "valid": None,
               "ts": datetime.datetime.now().isoformat(timespec="seconds")}
     if form:
-        result.update(form_build(form, answer, d, log, emit))
+        result.update(form_build(form, answer, d, log, emit, question))
     elif gian:
         result.update(gian_build(preset, answer, d, log, emit))
     elif task == "draft":
