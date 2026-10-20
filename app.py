@@ -28,6 +28,17 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import portal_auth  # 포털 서명 확인 관문·오류 문장 정리(원본 agent-page-portal/sdk/portal_auth.py)
 
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:  # tzdata 없는 환경 — 한국은 일광절약시간 없음
+    KST = datetime.timezone(datetime.timedelta(hours=9), "KST")
+
+
+def today_kst():
+    """문서 작성일·[오늘]은 한국 날짜 — 서버는 UTC"""
+    return datetime.datetime.now(KST).date()
+
 import forms
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -388,7 +399,7 @@ def gian_values(preset, answer):
         else:
             v["붙임"], v["본문"] = "", body + "  끝."
     elif not v.get("작성일"):
-        t = datetime.date.today(); v["작성일"] = f"{t.year}. {t.month}. {t.day}."
+        t = today_kst(); v["작성일"] = f"{t.year}. {t.month}. {t.day}."
     return v, att
 
 
@@ -559,7 +570,7 @@ def process(task, question="", file=None, model=MODEL, preset="보고서", emit=
     user = (f"[문서 시작]\n{source}\n[문서 끝]" + ("\n(※ 문서가 길어 앞부분만 제공됨)" if truncated else "")
             if source else "[문서 없음]") + f"\n\n[요청]\n{question or {'summary': '요약해줘', 'qa': '핵심 내용은?', 'draft': '문서 내용으로 초안 작성'}[task]}"
     if form:
-        t = datetime.date.today()
+        t = today_kst()
         user = f"[양식] {form[0]['name']}\n{forms.prompt_spec(form[0])}\n\n[오늘] {t.year}. {t.month}. {t.day}.\n\n" + user
     write(os.path.join(d, "01_prompt.txt"), user)
 
