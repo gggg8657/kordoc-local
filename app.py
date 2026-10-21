@@ -740,7 +740,7 @@ class H(BaseHTTPRequestHandler):
             if self.path == "/api/models":
                 return self._send(models())
             if self.path == "/api/forms":
-                return self._send(forms.listing(agent_user(self)))
+                return self._send(forms.listing(agent_user(self), portal_auth.is_admin(self)))
             if self.path == "/api/runs":
                 return self._send(list_runs(user_ws(self)))
             ws = user_ws(self)
@@ -778,7 +778,7 @@ class H(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self._send({"error": "잘못된 요청(JSON)"}, code=400)
-        by = agent_user(self)
+        by, admin = agent_user(self), portal_auth.is_admin(self)   # 관리자 계정 = 자기 아이디 + 서명된 admin 역할(양식 관리 권한만)
         if self.path == "/api/polish_text":  # 다른 도구의 "윤문하기" (writer·notebook·meeting) — JSON 한 번에
             try:
                 return self._send(polish_text(req.get("text") or "", req.get("model") or MODEL, req.get("strength") or "standard"))
@@ -792,9 +792,9 @@ class H(BaseHTTPRequestHandler):
                     name = req.get("file_name") or ""
                     if not name.lower().endswith(".hwpx"):
                         raise ValueError(f"양식은 HWPX 파일만 받습니다({os.path.splitext(name)[1] or '확장자 없음'}). " + forms.HOWTO)
-                    return self._send(forms.register((req.get("name") or os.path.splitext(name)[0]).strip()[:60], b64file(req["file_b64"], "양식 파일"), kordoc, by))
-                if self.path == "/api/forms/delete": return self._send(forms.remove(req.get("id"), by))
-                if self.path == "/api/forms/kind": return self._send(forms.set_kind(req.get("id"), req.get("kind"), by))
+                    return self._send(forms.register((req.get("name") or os.path.splitext(name)[0]).strip()[:60], b64file(req["file_b64"], "양식 파일"), kordoc, by, admin))
+                if self.path == "/api/forms/delete": return self._send(forms.remove(req.get("id"), by, admin))
+                if self.path == "/api/forms/kind": return self._send(forms.set_kind(req.get("id"), req.get("kind"), by, admin))
             except PermissionError as e:
                 return self._send({"error": str(e)}, code=403)
             except OverflowError as e:

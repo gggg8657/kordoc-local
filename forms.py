@@ -167,7 +167,7 @@ def big_boxes(sec):
     return list(dict.fromkeys(out))
 
 
-def register(name, data, kordoc, by="owner"):
+def register(name, data, kordoc, by="owner", admin=False):
     """양식 등록. 만든 계정(_by)을 남긴다(지우기·종류 바꾸기 권한). 분석이 실패하면 올린 파일을 남기지 않는다"""
     os.makedirs(DIR, exist_ok=True)
     fid = secrets.token_hex(4)
@@ -184,25 +184,25 @@ def register(name, data, kordoc, by="owner"):
         for p in (path, path[:-5] + ".json"):
             if os.path.exists(p): os.remove(p)
         raise
-    return public(meta, by)
+    return public(meta, by, admin)
 
 
-def can_edit(meta, by):
-    """만든 계정·owner 만. 만든 사람 기록이 없는 예전 양식은 owner 만"""
-    return by == "owner" or meta.get("_by") == by
+def can_edit(meta, by, admin=False):
+    """만든 계정·관리자(owner 또는 포털이 서명한 admin 역할 — admin=True)만. 만든 사람 기록이 없는 예전 양식은 관리자만"""
+    return by == "owner" or admin or meta.get("_by") == by
 
 
-def public(meta, by="owner"):
+def public(meta, by="owner", admin=False):
     """응답용: 만든 계정은 빼고, 이 사용자가 지우거나 바꿀 수 있는지(can_edit)만"""
-    return {**{k: v for k, v in meta.items() if k != "_by"}, "can_edit": can_edit(meta, by)}
+    return {**{k: v for k, v in meta.items() if k != "_by"}, "can_edit": can_edit(meta, by, admin)}
 
 
-def listing(by="owner"):
+def listing(by="owner", admin=False):
     if not os.path.isdir(DIR): return []
     out = []
     for n in sorted(os.listdir(DIR)):
         if n.endswith(".json"):
-            out.append(public(get(n[:-5])[0], by))
+            out.append(public(get(n[:-5])[0], by, admin))
     return out
 
 
@@ -222,24 +222,24 @@ def get(fid):
     return meta, path
 
 
-def remove(fid, by="owner"):
+def remove(fid, by="owner", admin=False):
     meta, path = get(fid)
-    if not can_edit(meta, by):
+    if not can_edit(meta, by, admin):
         raise PermissionError("이 양식은 만든 사람이나 관리자만 지울 수 있습니다")
     for p in (path, path[:-5] + ".json"):
         if os.path.exists(p): os.remove(p)
     return {"ok": True}
 
 
-def set_kind(fid, kind, by="owner"):
+def set_kind(fid, kind, by="owner", admin=False):
     if kind not in ("fill", "body"): raise ValueError("kind")
     meta, _ = get(fid)
-    if not can_edit(meta, by):
+    if not can_edit(meta, by, admin):
         raise PermissionError("이 양식은 만든 사람이나 관리자만 바꿀 수 있습니다")
     meta["kind"] = kind
     meta["kind_selected"] = True
     with open(os.path.join(DIR, fid + ".json"), "w", encoding="utf-8") as f: json.dump(meta, f, ensure_ascii=False, indent=1)
-    return public(meta, by)
+    return public(meta, by, admin)
 
 
 # ── LLM 프롬프트 재료 ─────────────────────────────────────────────────────

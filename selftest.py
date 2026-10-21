@@ -207,4 +207,32 @@ import base64 as _b
 _h = app.signed(app.HTML.replace("data-sig", "").replace('name="author"', ""))
 assert "data-sig" in _h and 'name="author"' in _h and _b.b64decode("ZG9uZ2p1a2ltLmRldkBnbWFpbC5jb20=").decode() in _h, "저작권 표기 누락"
 
+# 10) 관리자 계정 분리(포털 관문 그대로): 관리자 두 계정은 각자 u/<id>, 둘 다 양식 관리 권한. 서명 없는/위장 역할은 권한 없음
+import json as _j, tempfile as _tf, threading as _th, urllib.request as _ur, urllib.error as _ue
+from http.server import ThreadingHTTPServer as _S
+os.environ["PORTAL_TOOL_KEY"] = "selftest-" + "k" * 40
+_ws0, app.WS = app.WS, _tf.mkdtemp()
+app.forms.DIR = _tf.mkdtemp()
+_srv = _S(("127.0.0.1", 0), app.portal_auth.install(app.H, "kordoc-local"))
+_th.Thread(target=_srv.serve_forever, daemon=True).start()
+def _get(path, hd):
+    try:
+        with _ur.urlopen(_ur.Request(f"http://127.0.0.1:{_srv.server_address[1]}{path}", headers=hd), timeout=10) as r:
+            return r.status, _j.loads(r.read())
+    except _ue.HTTPError as e:
+        return e.code, None
+_f = app.forms.register("관리 시험", open(os.path.join(app.ROOT, "sample", "polish_test.hwpx"), "rb").read(), app.kordoc, "alice")
+_sig = lambda u, role=None: app.portal_auth.sign(u, "kordoc-local", role=role)
+_edit = lambda hd: next(x for x in _get("/api/forms", hd)[1] if x["id"] == _f["id"])["can_edit"]
+assert _edit(_sig("adm1", role="admin")) and _edit(_sig("adm2", role="admin")) and _edit(_sig("owner")), "관리자 두 계정·owner 모두 관리 권한"
+assert not _edit(_sig("bob")) and not _edit({**_sig("bob"), "X-Agent-Role": "admin"}), "서명 없는 역할은 권한 없음"
+_forged = {**_sig("bob"), "X-Agent-Role": "admin", "X-Agent-Role-Auth": _sig("adm1", role="admin")["X-Agent-Role-Auth"]}
+assert not _edit(_forged), "남의 역할 서명을 옮겨 붙여도 권한 없음"
+assert _get("/api/forms", {"X-Agent-User": "adm1", "X-Agent-Role": "admin"})[0] == 401, "서명 없으면 거부"
+for _u in ("adm1", "adm2"):
+    assert _get("/api/runs", _sig(_u, role="admin"))[0] == 200
+assert sorted(os.listdir(os.path.join(app.WS, "u"))) == ["adm1", "adm2"], "관리자 계정은 각자 작업 폴더(루트를 같이 쓰지 않음)"
+_srv.shutdown(); _sh.rmtree(app.WS); _sh.rmtree(app.forms.DIR); app.WS = _ws0
+os.environ.pop("PORTAL_TOOL_KEY")
+
 print("selftest OK — kordoc:", " ".join(app.KORDOC[:2]), "runs:", [x["run_id"] for x in app.list_runs()[:3]])
