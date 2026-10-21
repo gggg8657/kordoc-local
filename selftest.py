@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """LLM 없이 kordoc 왕복만 검증한다: parse(HWPX→MD) → [draft] lint → generate → validate, [polish] 조각 윤문 → patch.
 Ollama 호출을 가짜 함수로 바꿔 끼운다.  npm install 후  python3 selftest.py"""
+import json
 import os
 import re
+import shutil
+import sys
 import app
 
 SAMPLE = os.path.join(app.ROOT, "sample", "dummy.hwpx")
@@ -140,6 +143,64 @@ _sh.rmtree(app.forms.DIR)
 app.ollama = fake_polish
 r = app.polish_text("ㅇ 수작업 위주로 진행되어지고 있음\nㅇ 약 42%가 검토 중임")
 assert "진행되고 있음" in r["output"] and "42%" in r["output"] and r["rejected"] and r["units"] == 2, r
+
+# 브라우저가 떠나도(첫 진행 이벤트 뒤 쓰기가 BrokenPipeError) 작업은 끝까지 — 결과는 실행 기록에 남고, 서버 오류·트레이스백 없음
+import io, threading, urllib.request
+from http.server import ThreadingHTTPServer
+
+
+class Cut:
+    def __init__(s, f, n):
+        s.f, s.n = f, n
+
+    def write(s, b):
+        s.n -= 1
+        if s.n < 0:
+            raise BrokenPipeError(32, "Broken pipe")
+        return s.f.write(b)
+
+    def flush(s):
+        pass
+
+    def __getattr__(s, k):
+        return getattr(s.f, k)
+
+
+class CutH(app.H):
+    def setup(s):
+        super().setup()
+        s.wfile = Cut(s.wfile, 2)  # 응답 머리 + 첫 이벤트까지만 닿음
+
+
+ERRS = []
+
+
+class Srv(ThreadingHTTPServer):
+    def handle_error(s, req, addr):
+        ERRS.append(sys.exc_info()[1])
+
+
+def cut_post(path, body, user="dc-test"):
+    cut = Srv(("127.0.0.1", 0), CutH)
+    threading.Thread(target=cut.serve_forever, daemon=True).start()
+    err0, sys.stderr = sys.stderr, io.StringIO()
+    try:
+        r = urllib.request.Request(f"http://127.0.0.1:{cut.server_address[1]}{path}", json.dumps(body).encode(),
+                                   {"Content-Type": "application/json", "X-Agent-User": user})
+        got, log = urllib.request.urlopen(r, timeout=60).read().decode(), sys.stderr.getvalue()
+    finally:
+        sys.stderr = err0
+        cut.shutdown()
+        cut.server_close()
+    assert got.count("data: ") == 1 and not ERRS and "Traceback" not in log and log.count("연결 끊김") == 1, (got, ERRS, log)
+    return os.path.join(app.WS, "u", user)
+app.ollama, FAKE = fake, "□ 떠난 뒤에도 끝까지 쓴 답"
+d = cut_post("/api/run", {"task": "qa", "question": "수도는?", "model": "fake"})
+try:
+    runs = app.list_runs(d)
+    assert [x["task"] for x in runs] == ["qa"] and app.read(os.path.join(d, runs[0]["run_id"], "result.json")).count("끝까지 쓴 답"), runs
+finally:
+    shutil.rmtree(d, ignore_errors=True)
 
 # 저작권 표기: ui.html 에서 지워도 서버가 다시 붙인다 (LICENSE·NOTICE)
 import base64 as _b
